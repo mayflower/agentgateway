@@ -1,0 +1,27 @@
+# Reachable by both agentgateway and the browser; Dex derives its advertised
+# authorization/token endpoints from this value.
+issuer: http://localhost:5556/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+staticClients:
+- id: mcp-cli
+  name: MCP CLI
+  public: true
+  redirectURIs:
+  - http://127.0.0.1:6274/oauth/callback
+  - http://localhost:6274/oauth/callback
+# The protected resource: the audience agentgateway validates. Its secret is never
+# given to agentgateway or to MCP clients; it exists to hold the trustedPeers record.
+- id: mcp-resource
+  name: MCP Resource
+  secret: unused-by-agentgateway
+  trustedPeers:
+  - mcp-cli
+enablePasswordDB: true
+staticPasswords:
+- email: testuser@example.com
+  hash: "$2a$10$33EMT0cMMdnUjH0wH7MG5eT4JY4nbxie3t1raByPBBXGgm8aCAYj2"
+  username: testuser
+  userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"

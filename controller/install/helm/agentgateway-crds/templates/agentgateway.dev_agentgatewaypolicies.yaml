@@ -5779,6 +5779,7 @@ spec:
                             - Auth0
                             - Authentik
                             - Descope
+                            - Dex
                             - Entra
                             - Keycloak
                             - Okta
@@ -9637,6 +9638,7 @@ spec:
                             - Auth0
                             - Authentik
                             - Descope
+                            - Dex
                             - Entra
                             - Keycloak
                             - Okta

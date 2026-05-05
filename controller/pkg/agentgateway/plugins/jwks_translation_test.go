@@ -145,3 +145,11 @@ func TestTranslateMCPAuthenticationSpecWhenLookupReturnsErrorLeavesInlineEmptyAn
 		t.Fatalf("expected permissive mode, got %v", spec.Mode)
 	}
 }
+
+func TestTranslateMcpIDPMapsDex(t *testing.T) {
+	provider := agentgateway.Dex
+
+	if got := translateMcpIDP(&provider); got != api.BackendPolicySpec_McpAuthentication_DEX {
+		t.Fatalf("expected Dex provider to map to DEX, got %v", got)
+	}
+}

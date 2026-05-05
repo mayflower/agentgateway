@@ -1659,6 +1659,7 @@ message BackendPolicySpec {
       DESCOPE = 4;
       AUTHENTIK = 5;
       ENTRA = 6;
+      DEX = 7;
     }
 
     // Validation mode for JWT authentication

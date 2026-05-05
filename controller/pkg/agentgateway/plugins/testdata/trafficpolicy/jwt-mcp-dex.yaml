@@ -1,0 +1,112 @@
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: jwt-mcp-dex
+  namespace: default
+spec:
+  targetRefs:
+  - kind: Gateway
+    name: test
+    group: gateway.networking.k8s.io
+  traffic:
+    jwtAuthentication:
+      mode: Strict
+      providers:
+      - issuer: http://dex:5556/dex
+        audiences:
+        - agentgateway-mcp
+        jwks:
+          inline: |
+            {
+              "keys": [
+                {
+                  "kty": "RSA",
+                  "e": "AQAB",
+                  "use": "sig",
+                  "kid": "test-key",
+                  "alg": "RS256",
+                  "n": "test"
+                }
+              ]
+            }
+      mcp:
+        provider: Dex
+        resourceMetadata:
+          resource: http://localhost:3000/dex/mcp
+          scopesSupported:
+          - openid
+          - email
+          - audience:server:client_id:agentgateway-mcp
+
+---
+# Output
+output:
+- gateway:
+    Name: test
+    Namespace: default
+  resource:
+    policy:
+      key: traffic/default/jwt-mcp-dex:jwt:default/test
+      name:
+        kind: AgentgatewayPolicy
+        name: jwt-mcp-dex
+        namespace: default
+      target:
+        gateway:
+          name: test
+          namespace: default
+      traffic:
+        jwt:
+          mcp:
+            provider: DEX
+            resourceMetadata:
+              extra:
+                resource: http://localhost:3000/dex/mcp
+                scopesSupported:
+                - openid
+                - email
+                - audience:server:client_id:agentgateway-mcp
+          mode: STRICT
+          providers:
+          - audiences:
+            - agentgateway-mcp
+            inline: |
+              {
+                "keys": [
+                  {
+                    "kty": "RSA",
+                    "e": "AQAB",
+                    "use": "sig",
+                    "kid": "test-key",
+                    "alg": "RS256",
+                    "n": "test"
+                  }
+                ]
+              }
+            issuer: http://dex:5556/dex
+status:
+- apiVersion: agentgateway.dev/v1alpha1
+  kind: AgentgatewayPolicy
+  metadata:
+    name: jwt-mcp-dex
+    namespace: default
+  spec: null
+  status:
+    ancestors:
+    - ancestorRef:
+        group: gateway.networking.k8s.io
+        kind: Gateway
+        name: test
+        namespace: default
+      conditions:
+      - lastTransitionTime: fake
+        message: Policy accepted
+        reason: Valid
+        status: "True"
+        type: Accepted
+      - lastTransitionTime: fake
+        message: Attached to all targets
+        reason: Attached
+        status: "True"
+        type: Attached
+      controllerName: agentgateway.dev/agentgateway

@@ -316,12 +316,13 @@ pub(super) async fn authorization_server_metadata(
 	// RFC 8414 URL for standard AS metadata. Keycloak does not implement RFC 8414; it only
 	// exposes OpenID Provider Metadata at {issuer}/.well-known/openid-configuration (OIDC Discovery).
 	let metadata_uri = match &auth.provider {
-		// Keycloak, Okta, Descope, and authentik do not support the RFC 8414 path-based issuer
+		// Keycloak, Okta, Descope, authentik, and Dex do not support the RFC 8414 path-based issuer
 		// format; they serve metadata at {issuer}/.well-known/openid-configuration (OIDC Discovery).
 		Some(McpIDP::Keycloak { .. })
 		| Some(McpIDP::Okta {})
 		| Some(McpIDP::Descope {})
-		| Some(McpIDP::Authentik {}) => openid_configuration_metadata_url(&auth.issuer),
+		| Some(McpIDP::Authentik {})
+		| Some(McpIDP::Dex {}) => openid_configuration_metadata_url(&auth.issuer),
 		// Entra does not implement RFC 8414 either; it only serves OIDC Discovery documents.
 		// Always fetch the v2.0 document (derived from the tenant in the issuer) so the
 		// advertised endpoints support the scope/PKCE flows MCP clients use, even when the
@@ -411,14 +412,15 @@ pub(super) async fn authorization_server_metadata(
 			};
 			*re = format!("{current_uri}/client-registration");
 		},
-		Some(McpIDP::Authentik {}) => {
-			// authentik does not support RFC 8707, and has no audience query parameter workaround.
-			// Tokens carry the OAuth client ID in `aud`, so users must configure `audiences`
-			// with the pre-registered client ID.
+		Some(McpIDP::Authentik {}) | Some(McpIDP::Dex {}) => {
+			// Neither supports RFC 8707, and neither has an audience query parameter workaround.
+			// authentik puts the OAuth client ID in `aud`, so `audiences` must carry the
+			// pre-registered client ID. Dex instead mints the audience from the cross-client
+			// scope `audience:server:client_id:<id>`, so `audiences` carries that target client.
 
-			// authentik does not implement Dynamic Client Registration (RFC 7591), so its
-			// discovery metadata has no registration_endpoint at all:
-			// https://github.com/goauthentik/authentik/issues/8751
+			// Neither implements Dynamic Client Registration (RFC 7591), so their discovery
+			// metadata has no registration_endpoint at all (authentik:
+			// https://github.com/goauthentik/authentik/issues/8751; Dex exposes no public DCR).
 			// Inject one pointing at the gateway so MCP clients can complete DCR against
 			// the pre-registered client configured via `clientId`.
 			let current_uri = request_uri_for_oauth_metadata(req);
@@ -540,6 +542,14 @@ pub(super) async fn client_registration(
 			// is a pre-registered client via `clientId`, which is handled above.
 			return Err(ProxyError::ProcessingString(
 				"authentik does not support Dynamic Client Registration; set clientId to a pre-registered public client".to_string(),
+			));
+		},
+		Some(McpIDP::Dex {}) => {
+			// Dex exposes no public DCR endpoint; static clients are declared in its config
+			// (`staticClients`) or managed through its API. The only supported flow is a
+			// pre-registered client via `clientId`, which is handled above.
+			return Err(ProxyError::ProcessingString(
+				"Dex does not support Dynamic Client Registration; set clientId to a pre-registered public Dex staticClient".to_string(),
 			));
 		},
 		// Keycloak and default
@@ -756,9 +766,40 @@ async fn build_mock_dcr_response(
 
 #[cfg(test)]
 mod tests {
+	use std::collections::BTreeMap;
 	use std::sync::Arc;
 
+	use serde_json::json;
+	use wiremock::matchers::{method, path};
+	use wiremock::{Mock, MockServer, ResponseTemplate};
+
 	use super::*;
+	use crate::http::jwt;
+	use crate::types::agent::{McpAuthenticationMode, ResourceMetadata};
+
+	fn policy_client() -> PolicyClient {
+		crate::test_helpers::policy_client()
+	}
+
+	fn test_auth(provider: Option<McpIDP>, issuer: String) -> McpAuthentication {
+		McpAuthentication {
+			issuer,
+			audiences: vec!["mcp-server".to_string()],
+			provider,
+			resource_metadata: ResourceMetadata {
+				extra: BTreeMap::new(),
+			},
+			jwt_validator: Arc::new(jwt::Jwt::from_providers(
+				vec![],
+				jwt::Mode::Strict,
+				crate::http::auth::AuthorizationLocation::bearer_header(),
+				false,
+			)),
+			mode: McpAuthenticationMode::Strict,
+			client_id: None,
+			client_secret: None,
+		}
+	}
 
 	#[test]
 	fn request_uri_for_oauth_metadata_uses_x_forwarded_proto() {
@@ -1273,5 +1314,140 @@ mod tests {
 			"urn:ietf:params:oauth:grant-type:jwt-bearer"
 		)));
 		assert!(!entra_grant_may_use_client_secret(None));
+	}
+
+	#[tokio::test]
+	async fn dex_authorization_server_metadata_uses_oidc_discovery() {
+		let mock = MockServer::start().await;
+		Mock::given(method("GET"))
+			.and(path("/.well-known/openid-configuration"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(json!({
+				"issuer": mock.uri(),
+				"authorization_endpoint": format!("{}/auth", mock.uri()),
+				"token_endpoint": format!("{}/token", mock.uri()),
+				"jwks_uri": format!("{}/keys", mock.uri())
+			})))
+			.expect(1)
+			.mount(&mock)
+			.await;
+
+		let mut req = ::http::Request::builder()
+			.uri("http://gateway.example.com/.well-known/oauth-authorization-server/dex/mcp")
+			.body(Body::empty())
+			.expect("request should build");
+		let auth = test_auth(Some(McpIDP::Dex {}), mock.uri());
+
+		let resp = authorization_server_metadata(&mut req, &auth, policy_client())
+			.await
+			.expect("metadata response");
+		assert_eq!(resp.status(), StatusCode::OK);
+
+		let body = crate::http::read_resp_body(resp).await.expect("body");
+		let body: serde_json::Value = serde_json::from_slice(&body).expect("json");
+		// Dex serves OIDC Discovery, not RFC 8414; the mock asserts that path was the one hit.
+		// Upstream endpoints are passed through untouched (unlike Entra, which is proxied).
+		assert_eq!(
+			body["authorization_endpoint"],
+			format!("{}/auth", mock.uri())
+		);
+		assert_eq!(body["token_endpoint"], format!("{}/token", mock.uri()));
+	}
+
+	#[tokio::test]
+	async fn dex_authorization_server_metadata_advertises_gateway_registration_endpoint() {
+		let mock = MockServer::start().await;
+		Mock::given(method("GET"))
+			.and(path("/.well-known/openid-configuration"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(json!({
+				"issuer": mock.uri(),
+				"authorization_endpoint": format!("{}/auth", mock.uri()),
+				"token_endpoint": format!("{}/token", mock.uri()),
+				"jwks_uri": format!("{}/keys", mock.uri())
+			})))
+			.expect(1)
+			.mount(&mock)
+			.await;
+
+		let mut req = ::http::Request::builder()
+			.uri("http://gateway.example.com/.well-known/oauth-authorization-server/dex/mcp")
+			.body(Body::empty())
+			.expect("request should build");
+		let mut auth = test_auth(Some(McpIDP::Dex {}), mock.uri());
+		auth.client_id = Some("mcp-cli".to_string());
+
+		let resp = authorization_server_metadata(&mut req, &auth, policy_client())
+			.await
+			.expect("metadata response");
+		let body = crate::http::read_resp_body(resp).await.expect("body");
+		let body: serde_json::Value = serde_json::from_slice(&body).expect("json");
+
+		// Dex has no DCR of its own, so the gateway advertises its own bridge endpoint
+		// which answers with the pre-registered `clientId`.
+		assert_eq!(
+			body["registration_endpoint"],
+			"http://gateway.example.com/.well-known/oauth-authorization-server/dex/mcp/client-registration"
+		);
+	}
+
+	#[tokio::test]
+	async fn dex_client_registration_returns_configured_client_id() {
+		let mut req = ::http::Request::builder()
+			.method("POST")
+			.uri(
+				"http://gateway.example.com/.well-known/oauth-authorization-server/dex/mcp/client-registration",
+			)
+			.body(Body::from(
+				r#"{"redirect_uris":["http://127.0.0.1:6274/oauth/callback"]}"#,
+			))
+			.expect("request should build");
+		let mut auth = test_auth(
+			Some(McpIDP::Dex {}),
+			"https://dex.example.com/dex".to_string(),
+		);
+		auth.client_id = Some("mcp-cli".to_string());
+
+		let resp = handle_mcp_request(&mut req, &auth, &policy_client())
+			.await
+			.expect("handler should not error")
+			.expect("dex registration request should be handled");
+		assert_eq!(resp.status(), StatusCode::CREATED);
+
+		let json = response_body_to_json(resp).await;
+		assert_eq!(json["client_id"], "mcp-cli");
+		assert_eq!(
+			json["redirect_uris"],
+			serde_json::json!(["http://127.0.0.1:6274/oauth/callback"])
+		);
+	}
+
+	#[tokio::test]
+	async fn dex_client_registration_without_client_id_errors_and_is_not_proxied_to_keycloak() {
+		let mock = MockServer::start().await;
+		// Dex must never be proxied to Keycloak's DCR path (the `_` fallback in
+		// client_registration). Any request reaching the upstream fails this test.
+		Mock::given(method("POST"))
+			.respond_with(ResponseTemplate::new(201).set_body_json(json!({"client_id": "leaked"})))
+			.expect(0)
+			.mount(&mock)
+			.await;
+
+		let mut req = ::http::Request::builder()
+			.method("POST")
+			.uri(
+				"http://gateway.example.com/.well-known/oauth-authorization-server/dex/mcp/client-registration",
+			)
+			.body(Body::from("{}"))
+			.expect("request should build");
+		let auth = test_auth(Some(McpIDP::Dex {}), mock.uri());
+
+		let err = client_registration(&mut req, &auth, policy_client())
+			.await
+			.expect_err("Dex without clientId should be rejected");
+		let msg = err.to_string();
+		assert!(
+			msg.contains("Dex does not support Dynamic Client Registration"),
+			"unexpected error: {msg}"
+		);
+		assert!(msg.contains("clientId"), "error should name the fix: {msg}");
 	}
 }

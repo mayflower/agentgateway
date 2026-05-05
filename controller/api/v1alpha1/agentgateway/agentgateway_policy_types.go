@@ -2498,6 +2498,7 @@ const (
 	Descope   McpIDP = "Descope"
 	Authentik McpIDP = "Authentik"
 	Entra     McpIDP = "Entra"
+	Dex       McpIDP = "Dex"
 )
 
 // +k8s:enum

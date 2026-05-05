@@ -128,7 +128,7 @@ Also in `examples/mcp-authentication/config.yaml`:
 ### Scenario C: Adapting a vendor Authorization Server (e.g., Keycloak)
 
 When your Authorization Server doesn’t implement the spec as-is, agentgateway can fill in the gaps.
-Currently, six providers are supported: Keycloak, Auth0, Okta, Descope, authentik, and Microsoft Entra ID (Azure AD).
+Currently, seven providers are supported: Keycloak, Auth0, Okta, Descope, authentik, Microsoft Entra ID (Azure AD), and Dex.
 
 Excerpt from `examples/mcp-authentication/config.yaml`:
 
@@ -179,6 +179,7 @@ What setting a provider does (high level):
   - Descope → `https://api.descope.com/{project-id}/.well-known/jwks.json` (derived from agentic issuer path)
   - authentik → `<issuer>/jwks/`
   - Entra → `https://login.microsoftonline.com/<tenant>/discovery/v2.0/keys` (tenant derived from the issuer)
+  - Dex → `<issuer>/keys`
 
 Auth0-specific notes:
 - Gateway appends `?audience=...` to the authorization endpoint it exposes.
@@ -215,6 +216,75 @@ Descope-specific notes:
 - Supports RFC 8707 resource indicators — no audience workaround needed.
 - DCR requires a management key belonging to the server operator (not the MCP client). **Prefer setting `clientId` in config to skip DCR entirely.**
 - Client registration is proxied by the gateway at `.../client-registration` to forward to Descope’s management DCR endpoint.
+
+Dex-specific notes:
+- Dex exposes OIDC discovery at `<issuer>/.well-known/openid-configuration`; agentgateway uses that document for Dex instead of RFC 8414 Authorization Server metadata.
+- If `jwks` is omitted, agentgateway derives Dex JWKS from `<issuer>/keys`.
+- No Dynamic Client Registration: Dex exposes no public DCR endpoint (static clients are declared in its config or managed through its API). **Setting `clientId` is required**: the gateway injects a `registration_endpoint` into the AS metadata it exposes and answers registration requests itself with the pre-registered client. Without `clientId`, registration requests fail with an explicit error.
+- The pre-registered Dex client must be a **public** client (the mock registration response advertises `token_endpoint_auth_method: none`) using PKCE, and its `redirectURIs` must cover your MCP clients. A Dex public client that declares no `redirectURIs` accepts loopback redirects, which suits CLI clients on ephemeral ports; one that declares them accepts only those exact URIs.
+
+Dex uses four distinct identifiers — do not conflate them:
+
+| Concept | Example | What it is |
+| --- | --- | --- |
+| `clientId` | `mcp-cli` | The public, pre-registered Dex client the MCP client logs in as. |
+| `audiences` | `mcp-resource` | The `aud` agentgateway requires in the JWT — the *protected resource*, not a credential agentgateway uses. |
+| Cross-client scope | `audience:server:client_id:mcp-resource` | Asks Dex to mint the token for the protected resource instead of for `mcp-cli`. |
+| `trustedPeers` | on `mcp-resource`: `[mcp-cli]` | Permits `mcp-cli` to request that audience. |
+
+agentgateway never authenticates to Dex: it only validates tokens. The secret on the audience client is not given to agentgateway or to MCP clients; that client exists to be the audience and to hold the trust record.
+
+Note that Dex mints a **multi-valued** `aud` when a cross-client scope is used: it appends the
+requesting client, so the token carries `aud: ["mcp-resource", "mcp-cli"]` and sets `azp` to
+`mcp-cli`. Listing just `mcp-resource` in `audiences` is correct -- validation requires an
+intersection, not an exact match.
+
+Minimal Dex setup:
+
+```yaml
+# examples/mcp-authentication/dex/dex.yaml
+# The issuer must be reachable by BOTH agentgateway and the end user's browser,
+# since Dex's discovery document advertises browser-facing endpoints derived from it.
+issuer: http://localhost:5556/dex
+staticClients:
+# The client MCP clients log in as. Public + PKCE; no secret.
+- id: mcp-cli
+  public: true
+  redirectURIs:
+  - http://127.0.0.1:6274/oauth/callback
+  - http://localhost:6274/oauth/callback
+# The protected resource. Exists to be the token audience and hold the trust record;
+# neither agentgateway nor MCP clients ever use its credentials.
+- id: mcp-resource
+  secret: unused-by-agentgateway
+  trustedPeers:
+  - mcp-cli
+```
+
+Agentgateway MCP authentication with a pre-registered Dex client:
+
+```yaml
+mcpAuthentication:
+  issuer: http://localhost:5556/dex
+  # The audience agentgateway requires in the JWT.
+  audiences:
+  - mcp-resource
+  # Required: Dex has no DCR, so the gateway answers registration with this client.
+  clientId: mcp-cli
+  provider:
+    dex: {}
+  resourceMetadata:
+    resource: http://localhost:3000/dex/mcp
+    scopesSupported:
+    - openid
+    - email
+    - profile
+    - groups
+    - offline_access
+    # Makes Dex mint the token for mcp-resource rather than for mcp-cli.
+    - audience:server:client_id:mcp-resource
+    bearerMethodsSupported: [header, body, query]
+```
 
 Notes:
 - Omit the `provider` block for spec-compliant servers. Use it only when adaptation is needed.

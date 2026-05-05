@@ -4793,6 +4793,19 @@
             "entra"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "dex": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "dex"
+          ],
+          "additionalProperties": false
         }
       ]
     },
