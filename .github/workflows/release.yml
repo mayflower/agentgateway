@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    branches:
+    - "dex-support"
     tags:
     - "v*.*.*"
   workflow_dispatch:
@@ -52,6 +54,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
+      extra_tag: ${{ steps.version.outputs.extra_tag }}
+      extra_helm_tag: ${{ steps.version.outputs.extra_helm_tag }}
     steps:
       # Help debug what exact was input for this since Github doesn't expose it.
       - name: Output Inputs
@@ -60,15 +64,26 @@ jobs:
         id: version
         run: |
           # Determine version source
+          EXTRA_TAG="${{ inputs.extra_tag }}"
+          EXTRA_HELM_TAG="${{ inputs.extra_helm_tag }}"
           if [ -n "${{ inputs.version }}" ]; then
             VERSION="${{ inputs.version }}"
+          elif [ "${{ github.ref }}" = "refs/heads/dex-support" ]; then
+            SHORT_SHA="${GITHUB_SHA::12}"
+            VERSION="0.0.0-dex-support.${SHORT_SHA}"
+            EXTRA_TAG="${EXTRA_TAG:-dex-support}"
+            EXTRA_HELM_TAG="${EXTRA_HELM_TAG:-0.0.0-dex-support}"
           else
             VERSION="${{ github.ref_name }}"
           fi
           # Always strip 'v' prefix if present
           VERSION="${VERSION#v}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "extra_tag=${EXTRA_TAG}" >> $GITHUB_OUTPUT
+          echo "extra_helm_tag=${EXTRA_HELM_TAG}" >> $GITHUB_OUTPUT
           echo "Canonical VERSION: ${VERSION}"
+          echo "Extra image tag: ${EXTRA_TAG}"
+          echo "Extra Helm chart version: ${EXTRA_HELM_TAG}"
 
   build-image:
     runs-on: ${{ matrix.os }}
@@ -87,6 +102,7 @@ jobs:
             os: blacksmith-4vcpu-ubuntu-2404-arm
     env:
       VERSION: ${{ needs.setup.outputs.version }}
+      EXTRA_TAG: ${{ needs.setup.outputs.extra_tag }}
     steps:
     - name: Prepare
       run: |
@@ -148,6 +164,7 @@ jobs:
       - build-image
     env:
       VERSION: ${{ needs.setup.outputs.version }}
+      EXTRA_TAG: ${{ needs.setup.outputs.extra_tag }}
     steps:
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
@@ -178,6 +195,7 @@ jobs:
             type=raw,value=v${{ env.VERSION }}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=${{ inputs.extra_tag }},enable=${{ inputs.extra_tag != '' }}
+            type=raw,value=${{ env.EXTRA_TAG }},enable=${{ env.EXTRA_TAG != '' }}
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
@@ -193,8 +211,8 @@ jobs:
         run: cosign sign --yes ${{ env.REGISTRY_IMAGE }}:latest
 
       - name: Sign the extra tag
-        if: ${{ inputs.extra_tag != '' }}
-        run: cosign sign --yes ${{ env.REGISTRY_IMAGE }}:${{ inputs.extra_tag }}
+        if: ${{ env.EXTRA_TAG != '' }}
+        run: cosign sign --yes ${{ env.REGISTRY_IMAGE }}:${{ env.EXTRA_TAG }}
 
       - name: Inspect image
         run: |
@@ -222,6 +240,7 @@ jobs:
         working-directory: controller
     env:
       VERSION: ${{ needs.setup.outputs.version }}
+      EXTRA_TAG: ${{ needs.setup.outputs.extra_tag }}
     steps:
     - name: Prepare
       run: |
@@ -303,6 +322,7 @@ jobs:
       - build-controller-image
     env:
       VERSION: ${{ needs.setup.outputs.version }}
+      EXTRA_TAG: ${{ needs.setup.outputs.extra_tag }}
     steps:
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
@@ -342,7 +362,7 @@ jobs:
           images: ${{ env.CONTROLLER_REGISTRY_IMAGE }}
           tags: |
             type=raw,value=v${{ env.VERSION }}
-            type=raw,value=${{ inputs.extra_tag }},enable=${{ inputs.extra_tag != '' }}
+            type=raw,value=${{ env.EXTRA_TAG }},enable=${{ env.EXTRA_TAG != '' }}
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/controller-digests
@@ -354,8 +374,8 @@ jobs:
         run: cosign sign --yes ${{ env.CONTROLLER_REGISTRY_IMAGE }}:v${{ env.VERSION }}
 
       - name: Sign the extra tag
-        if: ${{ inputs.extra_tag != '' }}
-        run: cosign sign --yes ${{ env.CONTROLLER_REGISTRY_IMAGE }}:${{ inputs.extra_tag }}
+        if: ${{ env.EXTRA_TAG != '' }}
+        run: cosign sign --yes ${{ env.CONTROLLER_REGISTRY_IMAGE }}:${{ env.EXTRA_TAG }}
 
       - name: Attach VEX attestation
         run: |
@@ -380,6 +400,7 @@ jobs:
       - push-controller-image
     env:
       VERSION: ${{ needs.setup.outputs.version }}
+      EXTRA_HELM_TAG: ${{ needs.setup.outputs.extra_helm_tag }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -392,7 +413,7 @@ jobs:
         run: make -C controller release-charts
         env:
           IMAGE_REGISTRY: ${{ env.CHART_REGISTRY_IMAGE_BASE }}
-          EXTRA_HELM_TAG: ${{ inputs.extra_helm_tag }}
+          EXTRA_HELM_TAG: ${{ env.EXTRA_HELM_TAG }}
 
   build:
     if: ${{ github.event_name != 'workflow_call' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
