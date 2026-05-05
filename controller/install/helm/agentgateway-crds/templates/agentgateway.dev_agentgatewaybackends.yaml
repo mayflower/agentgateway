@@ -15694,6 +15694,7 @@ spec:
                             - Auth0
                             - Authentik
                             - Descope
+                            - Dex
                             - Entra
                             - Keycloak
                             - Okta

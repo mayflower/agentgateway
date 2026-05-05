@@ -3056,6 +3056,8 @@ impl LocalMcpAuthentication {
 				.map_err(|e| anyhow!(e))?
 				.jwks_uri
 				.parse()?,
+			// Dex serves its JWKS at {issuer}/keys.
+			Some(McpIDP::Dex {}) => format!("{}/keys", self.issuer.trim_end_matches('/')).parse()?,
 		})
 	}
 
@@ -3115,6 +3117,7 @@ pub enum McpIDP {
 	Descope {},
 	Authentik {},
 	Entra {},
+	Dex {},
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -3792,6 +3795,51 @@ jwtValidationOptions:
 				other => panic!("expected remote JWKS, got {other:?}"),
 			},
 			_ => panic!("Expected LocalJwtConfig::Single"),
+		}
+	}
+
+	#[test]
+	fn test_local_mcp_authentication_as_jwt_derives_dex_jwks() {
+		let yaml = r#"
+issuer: "https://dex.example.com/dex"
+audiences: ["mcp-server"]
+provider:
+  dex: {}
+resourceMetadata:
+  resource: "https://gateway.example.com/mcp"
+"#;
+		// Parse via yamlviajson, matching how config files are loaded (map-style enum variants).
+		let auth: LocalMcpAuthentication = serdes::yamlviajson::from_str(yaml).unwrap();
+		let jwt_config = auth.as_jwt().unwrap();
+
+		match jwt_config {
+			http::jwt::LocalJwtConfig::Single {
+				jwks: FileInlineOrRemote::Remote { url },
+				..
+			} => assert_eq!(url.to_string(), "https://dex.example.com/dex/keys"),
+			_ => panic!("Expected LocalJwtConfig::Single with remote JWKS"),
+		}
+	}
+
+	#[test]
+	fn test_local_mcp_authentication_as_jwt_derives_dex_jwks_with_trailing_slash_issuer() {
+		let yaml = r#"
+issuer: "https://dex.example.com/dex/"
+audiences: ["mcp-server"]
+provider:
+  dex: {}
+resourceMetadata:
+  resource: "https://gateway.example.com/mcp"
+"#;
+		let auth: LocalMcpAuthentication = serdes::yamlviajson::from_str(yaml).unwrap();
+		let jwt_config = auth.as_jwt().unwrap();
+
+		match jwt_config {
+			http::jwt::LocalJwtConfig::Single {
+				jwks: FileInlineOrRemote::Remote { url },
+				..
+			} => assert_eq!(url.to_string(), "https://dex.example.com/dex/keys"),
+			_ => panic!("Expected LocalJwtConfig::Single with remote JWKS"),
 		}
 	}
 

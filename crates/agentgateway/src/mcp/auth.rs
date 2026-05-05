@@ -75,6 +75,12 @@ pub(crate) async fn handle_mcp_request(
 ) -> Result<Option<Response>, ProxyError> {
 	match req.uri().path() {
 		// TODO: indicate this is a DirectResponse
+		path
+			if path.ends_with("client-registration")
+				&& matches!(&auth.provider, Some(McpIDP::Dex { .. })) =>
+		{
+			Ok(Some(StatusCode::NOT_FOUND.into_response()))
+		},
 		path if path.ends_with("client-registration") => Ok(Some(
 			client_registration(req, auth, client.clone())
 				.await
@@ -316,12 +322,13 @@ pub(super) async fn authorization_server_metadata(
 	// RFC 8414 URL for standard AS metadata. Keycloak does not implement RFC 8414; it only
 	// exposes OpenID Provider Metadata at {issuer}/.well-known/openid-configuration (OIDC Discovery).
 	let metadata_uri = match &auth.provider {
-		// Keycloak, Okta, Descope, and authentik do not support the RFC 8414 path-based issuer
+		// Keycloak, Okta, Descope, authentik, and Dex do not support the RFC 8414 path-based issuer
 		// format; they serve metadata at {issuer}/.well-known/openid-configuration (OIDC Discovery).
 		Some(McpIDP::Keycloak { .. })
 		| Some(McpIDP::Okta {})
 		| Some(McpIDP::Descope {})
-		| Some(McpIDP::Authentik {}) => openid_configuration_metadata_url(&auth.issuer),
+		| Some(McpIDP::Authentik {})
+		| Some(McpIDP::Dex {}) => openid_configuration_metadata_url(&auth.issuer),
 		// Entra does not implement RFC 8414 either; it only serves OIDC Discovery documents.
 		// Always fetch the v2.0 document (derived from the tenant in the issuer) so the
 		// advertised endpoints support the scope/PKCE flows MCP clients use, even when the
@@ -756,9 +763,40 @@ async fn build_mock_dcr_response(
 
 #[cfg(test)]
 mod tests {
+	use std::collections::BTreeMap;
 	use std::sync::Arc;
 
+	use serde_json::json;
+	use wiremock::matchers::{method, path};
+	use wiremock::{Mock, MockServer, ResponseTemplate};
+
 	use super::*;
+	use crate::http::jwt;
+	use crate::types::agent::{McpAuthenticationMode, ResourceMetadata};
+
+	fn policy_client() -> PolicyClient {
+		crate::test_helpers::policy_client()
+	}
+
+	fn test_auth(provider: Option<McpIDP>, issuer: String) -> McpAuthentication {
+		McpAuthentication {
+			issuer,
+			audiences: vec!["mcp-server".to_string()],
+			provider,
+			resource_metadata: ResourceMetadata {
+				extra: BTreeMap::new(),
+			},
+			jwt_validator: Arc::new(jwt::Jwt::from_providers(
+				vec![],
+				jwt::Mode::Strict,
+				crate::http::auth::AuthorizationLocation::bearer_header(),
+				false,
+			)),
+			mode: McpAuthenticationMode::Strict,
+			client_id: None,
+			client_secret: None,
+		}
+	}
 
 	#[test]
 	fn request_uri_for_oauth_metadata_uses_x_forwarded_proto() {
@@ -1273,5 +1311,60 @@ mod tests {
 			"urn:ietf:params:oauth:grant-type:jwt-bearer"
 		)));
 		assert!(!entra_grant_may_use_client_secret(None));
+	}
+
+	#[tokio::test]
+	async fn dex_authorization_server_metadata_uses_oidc_discovery_without_registration_endpoint() {
+		let mock = MockServer::start().await;
+		Mock::given(method("GET"))
+			.and(path("/.well-known/openid-configuration"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(json!({
+				"issuer": mock.uri(),
+				"authorization_endpoint": format!("{}/auth", mock.uri()),
+				"token_endpoint": format!("{}/token", mock.uri()),
+				"jwks_uri": format!("{}/keys", mock.uri())
+			})))
+			.expect(1)
+			.mount(&mock)
+			.await;
+
+		let mut req = ::http::Request::builder()
+			.uri("http://gateway.example.com/.well-known/oauth-authorization-server/dex/mcp")
+			.body(Body::empty())
+			.expect("request should build");
+		let auth = test_auth(Some(McpIDP::Dex {}), mock.uri());
+
+		let resp = authorization_server_metadata(&mut req, &auth, policy_client())
+			.await
+			.expect("metadata response");
+		assert_eq!(resp.status(), StatusCode::OK);
+
+		let body = crate::http::read_resp_body(resp).await.expect("body");
+		let body: serde_json::Value = serde_json::from_slice(&body).expect("json");
+		assert_eq!(
+			body["authorization_endpoint"],
+			format!("{}/auth", mock.uri())
+		);
+		assert!(body.get("registration_endpoint").is_none());
+	}
+
+	#[tokio::test]
+	async fn dex_client_registration_endpoint_is_not_proxied() {
+		let mut req = ::http::Request::builder()
+			.uri(
+				"http://gateway.example.com/.well-known/oauth-authorization-server/dex/mcp/client-registration",
+			)
+			.body(Body::empty())
+			.expect("request should build");
+		let auth = test_auth(
+			Some(McpIDP::Dex {}),
+			"https://dex.example.com/dex".to_string(),
+		);
+
+		let resp = handle_mcp_request(&mut req, &auth, &policy_client())
+			.await
+			.expect("handler should not error")
+			.expect("dex registration request should be handled");
+		assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 	}
 }

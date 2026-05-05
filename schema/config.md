@@ -506,6 +506,7 @@
 |`binds[].listeners[].routes[].policies.mcpAuthentication.provider.descope`|object||
 |`binds[].listeners[].routes[].policies.mcpAuthentication.provider.authentik`|object||
 |`binds[].listeners[].routes[].policies.mcpAuthentication.provider.entra`|object||
+|`binds[].listeners[].routes[].policies.mcpAuthentication.provider.dex`|object||
 |`binds[].listeners[].routes[].policies.mcpAuthentication.resourceMetadata`|object|Protected resource metadata returned to MCP clients.|
 |`binds[].listeners[].routes[].policies.mcpAuthentication.jwks`|object|JSON Web Key Set used to verify token signatures. Can be inline, from a file, or fetched remotely.<br>If omitted, the JWKS URL is derived from the issuer and provider.|
 |`binds[].listeners[].routes[].policies.mcpAuthentication.jwks.file`|string|Path to a file on disk to load the value from.|
@@ -19261,6 +19262,7 @@
 |`policies[].policy.mcpAuthentication.provider.descope`|object||
 |`policies[].policy.mcpAuthentication.provider.authentik`|object||
 |`policies[].policy.mcpAuthentication.provider.entra`|object||
+|`policies[].policy.mcpAuthentication.provider.dex`|object||
 |`policies[].policy.mcpAuthentication.resourceMetadata`|object|Protected resource metadata returned to MCP clients.|
 |`policies[].policy.mcpAuthentication.jwks`|object|JSON Web Key Set used to verify token signatures. Can be inline, from a file, or fetched remotely.<br>If omitted, the JWKS URL is derived from the issuer and provider.|
 |`policies[].policy.mcpAuthentication.jwks.file`|string|Path to a file on disk to load the value from.|
@@ -35188,6 +35190,7 @@
 |`routeGroups[].routes[].policies.mcpAuthentication.provider.descope`|object||
 |`routeGroups[].routes[].policies.mcpAuthentication.provider.authentik`|object||
 |`routeGroups[].routes[].policies.mcpAuthentication.provider.entra`|object||
+|`routeGroups[].routes[].policies.mcpAuthentication.provider.dex`|object||
 |`routeGroups[].routes[].policies.mcpAuthentication.resourceMetadata`|object|Protected resource metadata returned to MCP clients.|
 |`routeGroups[].routes[].policies.mcpAuthentication.jwks`|object|JSON Web Key Set used to verify token signatures. Can be inline, from a file, or fetched remotely.<br>If omitted, the JWKS URL is derived from the issuer and provider.|
 |`routeGroups[].routes[].policies.mcpAuthentication.jwks.file`|string|Path to a file on disk to load the value from.|
@@ -53751,6 +53754,7 @@
 |`routes[].policies.mcpAuthentication.provider.descope`|object||
 |`routes[].policies.mcpAuthentication.provider.authentik`|object||
 |`routes[].policies.mcpAuthentication.provider.entra`|object||
+|`routes[].policies.mcpAuthentication.provider.dex`|object||
 |`routes[].policies.mcpAuthentication.resourceMetadata`|object|Protected resource metadata returned to MCP clients.|
 |`routes[].policies.mcpAuthentication.jwks`|object|JSON Web Key Set used to verify token signatures. Can be inline, from a file, or fetched remotely.<br>If omitted, the JWKS URL is derived from the issuer and provider.|
 |`routes[].policies.mcpAuthentication.jwks.file`|string|Path to a file on disk to load the value from.|
@@ -77347,6 +77351,7 @@
 |`mcp.policies.mcpAuthentication.provider.descope`|object||
 |`mcp.policies.mcpAuthentication.provider.authentik`|object||
 |`mcp.policies.mcpAuthentication.provider.entra`|object||
+|`mcp.policies.mcpAuthentication.provider.dex`|object||
 |`mcp.policies.mcpAuthentication.resourceMetadata`|object|Protected resource metadata returned to MCP clients.|
 |`mcp.policies.mcpAuthentication.jwks`|object|JSON Web Key Set used to verify token signatures. Can be inline, from a file, or fetched remotely.<br>If omitted, the JWKS URL is derived from the issuer and provider.|
 |`mcp.policies.mcpAuthentication.jwks.file`|string|Path to a file on disk to load the value from.|

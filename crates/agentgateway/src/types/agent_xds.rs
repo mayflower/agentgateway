@@ -642,6 +642,7 @@ fn convert_mcp_provider(provider: i32) -> Option<McpIDP> {
 		x if x == McpIdp::Descope as i32 => Some(McpIDP::Descope {}),
 		x if x == McpIdp::Authentik as i32 => Some(McpIDP::Authentik {}),
 		x if x == McpIdp::Entra as i32 => Some(McpIDP::Entra {}),
+		x if x == McpIdp::Dex as i32 => Some(McpIDP::Dex {}),
 		_ => None,
 	}
 }
@@ -4669,6 +4670,16 @@ mod tests {
 			Err(TokenError::UnknownKeyId(kid)) if kid == "kid"
 		));
 		Ok(())
+	}
+
+	#[test]
+	fn test_convert_mcp_provider_supports_dex() {
+		use proto::agent::backend_policy_spec::mcp_authentication::McpIdp;
+
+		assert!(matches!(
+			convert_mcp_provider(McpIdp::Dex as i32),
+			Some(McpIDP::Dex {})
+		));
 	}
 
 	#[test]

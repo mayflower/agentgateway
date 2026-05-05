@@ -2211,6 +2211,7 @@ const (
 	BackendPolicySpec_McpAuthentication_DESCOPE     BackendPolicySpec_McpAuthentication_McpIDP = 4
 	BackendPolicySpec_McpAuthentication_AUTHENTIK   BackendPolicySpec_McpAuthentication_McpIDP = 5
 	BackendPolicySpec_McpAuthentication_ENTRA       BackendPolicySpec_McpAuthentication_McpIDP = 6
+	BackendPolicySpec_McpAuthentication_DEX         BackendPolicySpec_McpAuthentication_McpIDP = 7
 )
 
 // Enum value maps for BackendPolicySpec_McpAuthentication_McpIDP.
@@ -2223,6 +2224,7 @@ var (
 		4: "DESCOPE",
 		5: "AUTHENTIK",
 		6: "ENTRA",
+		7: "DEX",
 	}
 	BackendPolicySpec_McpAuthentication_McpIDP_value = map[string]int32{
 		"UNSPECIFIED": 0,
@@ -2232,6 +2234,7 @@ var (
 		"DESCOPE":     4,
 		"AUTHENTIK":   5,
 		"ENTRA":       6,
+		"DEX":         7,
 	}
 )
 
@@ -18650,7 +18653,7 @@ const file_resource_proto_rawDesc = "" +
 	"\vPolicyPhase\x12\t\n" +
 	"\x05ROUTE\x10\x00\x12\v\n" +
 	"\aGATEWAY\x10\x01B\x06\n" +
-	"\x04kind\"\x8eh\n" +
+	"\x04kind\"\x97h\n" +
 	"\x11BackendPolicySpec\x12D\n" +
 	"\x03a2a\x18\x01 \x01(\v20.agentgateway.dev.resource.BackendPolicySpec.A2aH\x00R\x03a2a\x12l\n" +
 	"\x11inference_routing\x18\x02 \x01(\v2=.agentgateway.dev.resource.BackendPolicySpec.InferenceRoutingH\x00R\x10inferenceRouting\x12Z\n" +
@@ -18919,7 +18922,7 @@ const file_resource_proto_rawDesc = "" +
 	"\x10McpAuthorization\x12\x14\n" +
 	"\x05allow\x18\x01 \x03(\tR\x05allow\x12\x12\n" +
 	"\x04deny\x18\x02 \x03(\tR\x04deny\x12\x18\n" +
-	"\arequire\x18\x03 \x03(\tR\arequire\x1a\xd0\b\n" +
+	"\arequire\x18\x03 \x03(\tR\arequire\x1a\xd9\b\n" +
 	"\x11McpAuthentication\x12\x16\n" +
 	"\x06issuer\x18\x01 \x01(\tR\x06issuer\x12\x1c\n" +
 	"\taudiences\x18\x02 \x03(\tR\taudiences\x12\x1f\n" +
@@ -18938,7 +18941,7 @@ const file_resource_proto_rawDesc = "" +
 	"\n" +
 	"ExtraEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
-	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"c\n" +
+	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value:\x028\x01\"l\n" +
 	"\x06McpIDP\x12\x0f\n" +
 	"\vUNSPECIFIED\x10\x00\x12\t\n" +
 	"\x05AUTH0\x10\x01\x12\f\n" +
@@ -18946,7 +18949,8 @@ const file_resource_proto_rawDesc = "" +
 	"\x04OKTA\x10\x03\x12\v\n" +
 	"\aDESCOPE\x10\x04\x12\r\n" +
 	"\tAUTHENTIK\x10\x05\x12\t\n" +
-	"\x05ENTRA\x10\x06\"0\n" +
+	"\x05ENTRA\x10\x06\x12\a\n" +
+	"\x03DEX\x10\a\"0\n" +
 	"\x04Mode\x12\f\n" +
 	"\bOPTIONAL\x10\x00\x12\n" +
 	"\n" +

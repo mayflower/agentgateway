@@ -128,7 +128,7 @@ Also in `examples/mcp-authentication/config.yaml`:
 ### Scenario C: Adapting a vendor Authorization Server (e.g., Keycloak)
 
 When your Authorization Server doesn’t implement the spec as-is, agentgateway can fill in the gaps.
-Currently, six providers are supported: Keycloak, Auth0, Okta, Descope, authentik, and Microsoft Entra ID (Azure AD).
+Currently, seven providers are supported: Keycloak, Auth0, Okta, Descope, authentik, Microsoft Entra ID (Azure AD), and Dex.
 
 Excerpt from `examples/mcp-authentication/config.yaml`:
 
@@ -179,6 +179,7 @@ What setting a provider does (high level):
   - Descope → `https://api.descope.com/{project-id}/.well-known/jwks.json` (derived from agentic issuer path)
   - authentik → `<issuer>/jwks/`
   - Entra → `https://login.microsoftonline.com/<tenant>/discovery/v2.0/keys` (tenant derived from the issuer)
+  - Dex → `<issuer>/keys`
 
 Auth0-specific notes:
 - Gateway appends `?audience=...` to the authorization endpoint it exposes.
@@ -215,6 +216,51 @@ Descope-specific notes:
 - Supports RFC 8707 resource indicators — no audience workaround needed.
 - DCR requires a management key belonging to the server operator (not the MCP client). **Prefer setting `clientId` in config to skip DCR entirely.**
 - Client registration is proxied by the gateway at `.../client-registration` to forward to Descope’s management DCR endpoint.
+
+Dex-specific notes:
+- Dex exposes OIDC discovery at `<issuer>/.well-known/openid-configuration`; agentgateway uses that document for Dex instead of RFC 8414 Authorization Server metadata.
+- Dex does not expose public HTTP Dynamic Client Registration. Configure MCP clients as Dex `staticClients` or manage them through the Dex API, then use `provider: { dex: {} }`.
+- If `jwks` is omitted, agentgateway derives Dex JWKS from `<issuer>/keys`.
+- For Dex audience binding across clients, request the Dex-native `audience:server:client_id:<client-id>` scope and configure `trustedPeers` on the target static client.
+
+Minimal Dex setup:
+
+```yaml
+# examples/mcp-authentication/dex/dex.yaml
+issuer: http://dex:5556/dex
+staticClients:
+- id: mcp-cli
+  public: true
+  redirectURIs:
+  - http://127.0.0.1:6274/oauth/callback
+- id: agentgateway-mcp
+  secret: agentgateway-mcp-secret
+  redirectURIs:
+  - http://localhost:3000/dex/mcp/callback
+  trustedPeers:
+  - mcp-cli
+```
+
+Agentgateway MCP authentication with a pre-registered Dex client:
+
+```yaml
+mcpAuthentication:
+  issuer: http://dex:5556/dex
+  audiences:
+  - agentgateway-mcp
+  provider:
+    dex: {}
+  resourceMetadata:
+    resource: http://localhost:3000/dex/mcp
+    scopesSupported:
+    - openid
+    - email
+    - profile
+    - groups
+    - offline_access
+    - audience:server:client_id:agentgateway-mcp
+    bearerMethodsSupported: [header, body, query]
+```
 
 Notes:
 - Omit the `provider` block for spec-compliant servers. Use it only when adaptation is needed.
