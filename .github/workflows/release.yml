@@ -420,7 +420,7 @@ jobs:
           EXTRA_HELM_TAG: ${{ env.EXTRA_HELM_TAG }}
 
   build:
-    if: ${{ github.event_name != 'workflow_call' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
+    if: ${{ github.event_name != 'workflow_call' && github.ref != 'refs/heads/dex-support' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
     needs:
       - setup
     runs-on: ${{ contains(fromJSON('["agentgateway","mayflower"]'), github.repository_owner) && matrix.blacksmith_os || matrix.github_os }}
@@ -521,7 +521,7 @@ jobs:
         if-no-files-found: error
 
   release:
-    if: ${{ github.event_name != 'workflow_call' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
+    if: ${{ github.event_name != 'workflow_call' && github.ref != 'refs/heads/dex-support' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
     needs:
     - setup
     - push-image
