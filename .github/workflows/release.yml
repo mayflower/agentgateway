@@ -86,7 +86,7 @@ jobs:
           echo "Extra Helm chart version: ${EXTRA_HELM_TAG}"
 
   build-image:
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ github.repository_owner == 'agentgateway' && matrix.blacksmith_os || matrix.github_os }}
     permissions:
       contents: read
       packages: write
@@ -97,9 +97,11 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            os: blacksmith-4vcpu-ubuntu-2404
+            blacksmith_os: blacksmith-4vcpu-ubuntu-2404
+            github_os: ubuntu-24.04
           - platform: linux/arm64
-            os: blacksmith-4vcpu-ubuntu-2404-arm
+            blacksmith_os: blacksmith-4vcpu-ubuntu-2404-arm
+            github_os: ubuntu-24.04-arm
     env:
       VERSION: ${{ needs.setup.outputs.version }}
       EXTRA_TAG: ${{ needs.setup.outputs.extra_tag }}
@@ -219,7 +221,7 @@ jobs:
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:v${{ env.VERSION }}
 
   build-controller-image:
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ github.repository_owner == 'agentgateway' && matrix.blacksmith_os || matrix.github_os }}
     permissions:
       contents: read
       packages: write
@@ -230,10 +232,12 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            os: ubuntu-24.04
+            blacksmith_os: ubuntu-24.04
+            github_os: ubuntu-24.04
             goarch: amd64
           - platform: linux/arm64
-            os: blacksmith-4vcpu-ubuntu-2404-arm
+            blacksmith_os: blacksmith-4vcpu-ubuntu-2404-arm
+            github_os: ubuntu-24.04-arm
             goarch: arm64
     defaults:
       run:
@@ -419,7 +423,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_call' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
     needs:
       - setup
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ github.repository_owner == 'agentgateway' && matrix.blacksmith_os || matrix.github_os }}
     permissions:
       contents: read
     env:
@@ -427,18 +431,22 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: blacksmith-4vcpu-ubuntu-2404
+          - blacksmith_os: blacksmith-4vcpu-ubuntu-2404
+            github_os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             name: linux
-          - os: blacksmith-4vcpu-ubuntu-2404-arm
+          - blacksmith_os: blacksmith-4vcpu-ubuntu-2404-arm
+            github_os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             # arm64 musl fails with jemalloc: https://github.com/tikv/jemallocator/issues/146
             extra_cargo_args: "--no-default-features --features agentgateway-app/mimalloc,agentgateway-app/crypto-aws-lc"
             name: linux-arm
-          - os: macos-26
+          - blacksmith_os: macos-26
+            github_os: macos-26
             target: aarch64-apple-darwin
             name: mac
-          - os: windows-2025
+          - blacksmith_os: windows-2025
+            github_os: windows-2025
             target: x86_64-pc-windows-msvc
             name: windows
     steps:
@@ -521,7 +529,7 @@ jobs:
     - push-helm-charts
     - build
     - build-agctl
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ github.repository_owner == 'agentgateway' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     permissions:
       contents: write
     env:
