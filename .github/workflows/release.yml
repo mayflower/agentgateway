@@ -86,7 +86,7 @@ jobs:
           echo "Extra Helm chart version: ${EXTRA_HELM_TAG}"
 
   build-image:
-    runs-on: ${{ github.repository_owner == 'agentgateway' && matrix.blacksmith_os || matrix.github_os }}
+    runs-on: ${{ contains(fromJSON('["agentgateway","mayflower"]'), github.repository_owner) && matrix.blacksmith_os || matrix.github_os }}
     permissions:
       contents: read
       packages: write
@@ -221,7 +221,7 @@ jobs:
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:v${{ env.VERSION }}
 
   build-controller-image:
-    runs-on: ${{ github.repository_owner == 'agentgateway' && matrix.blacksmith_os || matrix.github_os }}
+    runs-on: ${{ contains(fromJSON('["agentgateway","mayflower"]'), github.repository_owner) && matrix.blacksmith_os || matrix.github_os }}
     permissions:
       contents: read
       packages: write
@@ -423,7 +423,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_call' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
     needs:
       - setup
-    runs-on: ${{ github.repository_owner == 'agentgateway' && matrix.blacksmith_os || matrix.github_os }}
+    runs-on: ${{ contains(fromJSON('["agentgateway","mayflower"]'), github.repository_owner) && matrix.blacksmith_os || matrix.github_os }}
     permissions:
       contents: read
     env:
@@ -529,7 +529,7 @@ jobs:
     - push-helm-charts
     - build
     - build-agctl
-    runs-on: ${{ github.repository_owner == 'agentgateway' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    runs-on: ${{ contains(fromJSON('["agentgateway","mayflower"]'), github.repository_owner) && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     permissions:
       contents: write
     env:
