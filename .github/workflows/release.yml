@@ -420,7 +420,7 @@ jobs:
           EXTRA_HELM_TAG: ${{ env.EXTRA_HELM_TAG }}
 
   build:
-    if: ${{ github.event_name != 'workflow_call' && github.ref != 'refs/heads/dex-support' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
+    if: ${{ github.event_name != 'workflow_call' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
     needs:
       - setup
     runs-on: ${{ contains(fromJSON('["agentgateway","mayflower"]'), github.repository_owner) && matrix.blacksmith_os || matrix.github_os }}
@@ -521,7 +521,7 @@ jobs:
         if-no-files-found: error
 
   release:
-    if: ${{ github.event_name != 'workflow_call' && github.ref != 'refs/heads/dex-support' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
+    if: ${{ github.event_name != 'workflow_call' && (github.event_name == 'push' || ! github.event.inputs.skip_gh_release) }}
     needs:
     - setup
     - push-image
@@ -569,7 +569,7 @@ jobs:
         files: |
           outputs/agentgateway-*
           outputs/agctl-*
-        tag_name: ${{ github.ref_name }}
+        tag_name: v${{ env.VERSION }}
         generate_release_notes: true
         body: |
           🎉 Welcome to the ${{ env.VERSION }} release of the agentgateway project!
@@ -592,4 +592,4 @@ jobs:
           Follow the [Kubernetes](https://agentgateway.dev/docs/kubernetes/latest/quickstart/) or [Standalone](https://agentgateway.dev/docs/standalone/latest/quickstart/) quick start guide to get started!
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      if: startsWith(github.ref, 'refs/tags/')
+      if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/dex-support'
