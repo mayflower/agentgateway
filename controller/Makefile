@@ -510,6 +510,9 @@ HELM_CHART_DIR_AGW=install/helm/agentgateway
 HELM_CHART_DIR_AGW_CRD=install/helm/agentgateway-crds
 HELM_CHART_DIR_AGW_STANDALONE=install/helm/agentgateway-standalone
 HELM_ADDITIONAL_VALUES ?= hack/helm/dev.yaml
+RELEASE_HELM_CHART_DIR=$(TEST_ASSET_DIR)/release-charts
+RELEASE_HELM_CHART_DIR_AGW=$(RELEASE_HELM_CHART_DIR)/agentgateway
+RELEASE_HELM_CHART_DIR_AGW_CRD=$(RELEASE_HELM_CHART_DIR)/agentgateway-crds
 
 .PHONY: package-agentgateway-charts
 package-agentgateway-charts: package-agentgateway-chart package-agentgateway-crd-chart package-agentgateway-standalone-chart ## Package the agentgateway charts
@@ -534,23 +537,37 @@ package-agentgateway-standalone-chart: ## Package the standalone agentgateway ch
 
 CHART_NAMES := agentgateway agentgateway-crds agentgateway-standalone
 
+.PHONY: prepare-release-charts
+prepare-release-charts:
+	rm -rf $(RELEASE_HELM_CHART_DIR); \
+	mkdir -p $(RELEASE_HELM_CHART_DIR); \
+	cp -R $(HELM_CHART_DIR_AGW) $(RELEASE_HELM_CHART_DIR_AGW); \
+	cp -R $(HELM_CHART_DIR_AGW_CRD) $(RELEASE_HELM_CHART_DIR_AGW_CRD); \
+	perl -0pi -e 's{(^image:\n(?:  .*\n)*?  registry: )\S+}{$${1}$(IMAGE_REGISTRY)}m' $(RELEASE_HELM_CHART_DIR_AGW)/values.yaml;
+
 .PHONY: release-charts
-release-charts: package-agentgateway-charts
+release-charts: prepare-release-charts
 	mkdir -p $(TEST_ASSET_DIR); \
-	$(HELM) package --version $(HELM_CHART_VERSION_V) --app-version $(HELM_CHART_VERSION_V) --destination $(TEST_ASSET_DIR) $(HELM_CHART_DIR_AGW); \
+	$(HELM) package --version $(HELM_CHART_VERSION_NO_V) --app-version $(HELM_CHART_VERSION_NO_V) --destination $(TEST_ASSET_DIR) $(RELEASE_HELM_CHART_DIR_AGW); \
 	$(HELM) repo index $(TEST_ASSET_DIR);
 	mkdir -p $(TEST_ASSET_DIR); \
-	$(HELM) package --version $(HELM_CHART_VERSION_V) --app-version $(HELM_CHART_VERSION_V) --destination $(TEST_ASSET_DIR) $(HELM_CHART_DIR_AGW_CRD); \
+	$(HELM) package --version $(HELM_CHART_VERSION_NO_V) --app-version $(HELM_CHART_VERSION_NO_V) --destination $(TEST_ASSET_DIR) $(RELEASE_HELM_CHART_DIR_AGW_CRD); \
+	$(HELM) repo index $(TEST_ASSET_DIR);
+	mkdir -p $(TEST_ASSET_DIR); \
+	$(HELM) package --version $(HELM_CHART_VERSION_V) --app-version $(HELM_CHART_VERSION_V) --destination $(TEST_ASSET_DIR) $(RELEASE_HELM_CHART_DIR_AGW); \
+	$(HELM) repo index $(TEST_ASSET_DIR);
+	mkdir -p $(TEST_ASSET_DIR); \
+	$(HELM) package --version $(HELM_CHART_VERSION_V) --app-version $(HELM_CHART_VERSION_V) --destination $(TEST_ASSET_DIR) $(RELEASE_HELM_CHART_DIR_AGW_CRD); \
 	$(HELM) repo index $(TEST_ASSET_DIR);
 	mkdir -p $(TEST_ASSET_DIR); \
 	$(HELM) package --version $(HELM_CHART_VERSION_V) --app-version $(HELM_CHART_VERSION_V) --destination $(TEST_ASSET_DIR) $(HELM_CHART_DIR_AGW_STANDALONE); \
 	$(HELM) repo index $(TEST_ASSET_DIR);
 	@if [ -n "$(EXTRA_HELM_TAG)" ]; then \
 		mkdir -p $(TEST_ASSET_DIR); \
-		$(HELM) package --version $(EXTRA_HELM_TAG) --app-version $(VERSION) --destination $(TEST_ASSET_DIR) $(HELM_CHART_DIR_AGW); \
+		$(HELM) package --version $(EXTRA_HELM_TAG) --app-version $(VERSION) --destination $(TEST_ASSET_DIR) $(RELEASE_HELM_CHART_DIR_AGW); \
 		$(HELM) repo index $(TEST_ASSET_DIR); \
 		mkdir -p $(TEST_ASSET_DIR); \
-		$(HELM) package --version $(EXTRA_HELM_TAG) --app-version $(VERSION) --destination $(TEST_ASSET_DIR) $(HELM_CHART_DIR_AGW_CRD); \
+		$(HELM) package --version $(EXTRA_HELM_TAG) --app-version $(VERSION) --destination $(TEST_ASSET_DIR) $(RELEASE_HELM_CHART_DIR_AGW_CRD); \
 		$(HELM) repo index $(TEST_ASSET_DIR); \
 		mkdir -p $(TEST_ASSET_DIR); \
 		$(HELM) package --version $(EXTRA_HELM_TAG) --app-version $(VERSION) --destination $(TEST_ASSET_DIR) $(HELM_CHART_DIR_AGW_STANDALONE); \
