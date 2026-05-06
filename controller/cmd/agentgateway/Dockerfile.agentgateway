@@ -1,4 +1,4 @@
-FROM cgr.dev/chainguard/static
+FROM gcr.io/distroless/static-debian12:nonroot
 
 ARG GOARCH=amd64
 

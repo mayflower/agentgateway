@@ -96,7 +96,7 @@ if /out/agentgateway --version | grep -q '"version": "unknown"'; then
 fi
 EOF
 
-FROM cgr.dev/chainguard/glibc-dynamic AS runner
+FROM gcr.io/distroless/base-debian12:nonroot AS runner
 
 ARG TARGETARCH
 
