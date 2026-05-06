@@ -96,7 +96,7 @@ if /out/agentgateway --version | grep -q '"version": "unknown"'; then
 fi
 EOF
 
-FROM gcr.io/distroless/cc-debian12:nonroot AS runner
+FROM gcr.io/distroless/cc-debian13:nonroot AS runner
 
 ARG TARGETARCH
 
