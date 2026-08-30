@@ -49,6 +49,8 @@ pub const LOCAL_LISTENER_NAME: &str = "llm";
 mod anthropic_tests;
 #[cfg(test)]
 mod gemini_tests;
+#[cfg(test)]
+mod prompt_caching_tests;
 
 #[cfg(test)]
 mod tests;
@@ -402,8 +404,18 @@ fn apply_openai_moderation(
 	Ok(())
 }
 
-fn render_anthropic_messages(req: types::ChatRequest) -> Result<Vec<u8>, AIError> {
-	match req {
+fn render_anthropic_messages(
+	req: types::ChatRequest,
+	ctx: &ChatRequestContext<'_>,
+) -> Result<Vec<u8>, AIError> {
+	// `promptCaching` generates markers for the native Anthropic provider only. Vertex and
+	// custom providers also render AnthropicMessages, so gate on the provider rather than the
+	// chat format, and leave their output untouched.
+	let caching = match ctx.provider {
+		AIProvider::Anthropic(_) => ctx.prompt_caching,
+		_ => None,
+	};
+	let body = match req {
 		types::ChatRequest::Completions(req) => conversion::messages::from_completions::translate(&req),
 		types::ChatRequest::Messages(req) => serde_json::to_vec(&req).map_err(AIError::RequestMarshal),
 		types::ChatRequest::Responses(_) => Err(AIError::UnsupportedConversion(strng::literal!(
@@ -412,7 +424,25 @@ fn render_anthropic_messages(req: types::ChatRequest) -> Result<Vec<u8>, AIError
 		types::ChatRequest::Gemini(_) => Err(AIError::UnsupportedConversion(strng::literal!(
 			"gemini to messages"
 		))),
-	}
+	}?;
+	let Some(caching) = caching else {
+		// Without a policy the request is serialized exactly as before.
+		return Ok(body);
+	};
+	Ok(apply_anthropic_prompt_caching(body, caching))
+}
+
+/// Add policy-generated `cache_control` markers to an already-rendered Anthropic request.
+///
+/// Both Anthropic input paths above produce the same wire shape, so the policy is applied once
+/// to that shape. This is best-effort: if the body cannot be read back as JSON it is forwarded
+/// unchanged rather than failing a request that was otherwise valid.
+fn apply_anthropic_prompt_caching(body: Vec<u8>, caching: &policy::PromptCachingConfig) -> Vec<u8> {
+	let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&body) else {
+		return body;
+	};
+	conversion::messages_caching::apply(&mut value, caching);
+	serde_json::to_vec(&value).unwrap_or(body)
 }
 
 fn render_vertex_gemini(
@@ -505,9 +535,9 @@ impl ChatTranslation {
 			ChatFormat::OpenAICompletions => render_openai_completions(req, ctx),
 			ChatFormat::OpenAIResponses => render_openai_responses(req, ctx),
 			ChatFormat::AnthropicMessages if matches!(ctx.provider, AIProvider::Vertex(_)) => {
-				vertex::prepare_anthropic_message_body(render_anthropic_messages(req)?)
+				vertex::prepare_anthropic_message_body(render_anthropic_messages(req, ctx)?)
 			},
-			ChatFormat::AnthropicMessages => render_anthropic_messages(req),
+			ChatFormat::AnthropicMessages => render_anthropic_messages(req, ctx),
 			ChatFormat::BedrockConverse => return render_bedrock_converse(req, ctx),
 			ChatFormat::VertexGemini => {
 				return Ok(RenderedChatRequest {

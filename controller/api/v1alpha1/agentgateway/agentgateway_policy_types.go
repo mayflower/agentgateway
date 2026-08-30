@@ -2272,9 +2272,9 @@ type BackendAI struct {
 	ModelAliases map[string]string `json:"modelAliases,omitempty"`
 
 	// Automatic prompt caching for supported
-	// providers, currently AWS Bedrock.
+	// providers, currently AWS Bedrock and Anthropic.
 	// Reduces API costs by caching static content like system prompts and tool definitions.
-	// Only applicable for Bedrock Claude 3+ and Nova models.
+	// On Bedrock, only applicable to Claude 3+ and Nova models.
 	// +optional
 	PromptCaching *PromptCachingConfig `json:"promptCaching,omitempty"`
 

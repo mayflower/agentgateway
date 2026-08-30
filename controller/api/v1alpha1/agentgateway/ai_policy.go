@@ -460,10 +460,10 @@ type FieldTransformation struct {
 }
 
 // Automatic prompt caching for supported LLM providers.
-// Currently only AWS Bedrock supports this feature (Claude 3+ and Nova models).
+// Currently AWS Bedrock (Claude 3+ and Nova models) and Anthropic.
 //
 // When enabled, the gateway automatically inserts cache points at strategic locations
-// to reduce API costs. Bedrock charges lower rates for cached tokens (90% discount).
+// to reduce API costs. Both providers charge lower rates for cached tokens.
 //
 // Example:
 //
