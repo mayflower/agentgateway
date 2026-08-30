@@ -46,6 +46,14 @@ const KEYED_REQUEST_HEADERS: &[&str] = &[
 	"accept-encoding",
 ];
 
+/// Upstream credential headers, contributing to the key as an identity.
+///
+/// Not a substitute for the operator's `key` expressions, which name the *caller*: this names the
+/// credential the gateway attached on the way out. Two routes can share one backend policy — and so
+/// one cache — while attaching different credentials, and a stored response must not cross that
+/// boundary just because nobody thought to write an expression for it.
+const CREDENTIAL_HEADERS: &[&str] = &["authorization", "x-api-key", "api-key"];
+
 /// Response headers replayed from a stored entry.
 ///
 /// An allowlist, not a denylist: everything else an upstream sends is specific to the exchange that
@@ -58,8 +66,9 @@ const REPLAYED_RESPONSE_HEADERS: &[&str] = &["content-type", "content-encoding"]
 pub struct ResponseCacheConfig {
 	/// CEL expressions contributing additional dimensions to the cache key, evaluated against the
 	/// request. The gateway always keys on the finalized request body, the resolved provider, model,
-	/// client-facing format, upstream target, and upstream path; these expressions add what only the
-	/// deployment knows, such as the caller identity a response must not be shared across.
+	/// client-facing format, upstream target, upstream path, and the credential it attached; these
+	/// expressions add what only the deployment knows, such as the caller identity a response must
+	/// not be shared across.
 	///
 	/// Leaving this empty shares responses between every caller reaching the same route with the same
 	/// body. That is refused rather than done silently: with no expressions the cache serves no hits.
@@ -170,6 +179,21 @@ impl ResponseCache {
 			digest.field(b"\0");
 		}
 
+		// The credential the gateway resolved for this request. A credential that is re-derived per
+		// request cannot be keyed on — the key would never match twice — and cannot be left out
+		// either, so such a request bypasses instead. That is the deliberate trade: narrow
+		// eligibility rather than a key that is quietly incomplete.
+		for name in CREDENTIAL_HEADERS {
+			digest.field(name.as_bytes());
+			for value in inputs.headers.get_all(*name) {
+				if !credential_is_stable(value.as_bytes()) {
+					return None;
+				}
+				digest.field(value.as_bytes());
+			}
+			digest.field(b"\0");
+		}
+
 		// Operator-declared dimensions.
 		let exec = cel::Executor::new_request(req);
 		for expression in &self.config.key {
@@ -180,6 +204,13 @@ impl ResponseCache {
 
 		Some(digest.finish())
 	}
+}
+
+/// AWS SigV4 rebuilds the `Authorization` value for every request from a timestamp and a signature,
+/// so it identifies the exchange rather than the principal. Extracting the stable part would mean
+/// parsing the credential scope; until that is worth doing, such requests do not use the cache.
+fn credential_is_stable(value: &[u8]) -> bool {
+	!value.starts_with(b"AWS4-")
 }
 
 impl std::fmt::Debug for ResponseCache {

@@ -2099,7 +2099,8 @@ impl AIProvider {
 		// Carry the finalized body to the point where the exact response cache builds its key: that
 		// point only has an opaque `Body`, and this is the last place the bytes exist. Canonicalized
 		// here so JSON handling stays in the LLM layer. Only done when a cache is configured.
-		if policies.is_some_and(|p| p.response_cache.is_some())
+		if original_format == InputFormat::Completions
+			&& policies.is_some_and(|p| p.response_cache.is_some())
 			&& let Some(canonical) = response_cache::canonicalize(&body)
 		{
 			parts

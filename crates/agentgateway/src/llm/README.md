@@ -34,9 +34,13 @@ policies:
 **What the key covers.** The gateway always keys on the finalized request body, the resolved
 provider, model, client-facing format, upstream target, and upstream path, plus the forwarded
 headers that change what the provider returns (`anthropic-beta`, the OpenAI organization and project
-headers) and `accept-encoding`, which decides how the stored bytes are encoded. Per-request headers —
-AWS SigV4 signatures, `x-amz-date`, `traceparent` — are deliberately excluded; a key containing them
-would never match twice.
+headers), `accept-encoding`, which decides how the stored bytes are encoded, and the upstream
+credential the gateway attached. Per-request values — `x-amz-date`, `traceparent` — are deliberately
+excluded; a key containing them would never match twice.
+
+A credential that is rebuilt for every request cannot be keyed on and must not be ignored, so those
+requests bypass the cache instead. That currently means AWS SigV4: extracting the stable credential
+scope out of a signature is possible but not yet worth the parsing.
 
 The `key` expressions are what stop one caller receiving another caller's completion. The gateway
 cannot infer which dimension identifies a tenant in a given deployment, so it does not guess: a

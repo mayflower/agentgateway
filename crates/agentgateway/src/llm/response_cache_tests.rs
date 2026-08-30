@@ -427,3 +427,48 @@ fn a_different_accept_encoding_misses() {
 	let gzip = key_of(&cache, BODY, &request(&[("accept-encoding", "gzip")]));
 	assert_ne!(identity, gzip);
 }
+
+#[test]
+fn a_different_upstream_credential_misses() {
+	// Two routes can share one backend policy, and therefore one cache, while attaching different
+	// credentials. Nothing in the operator's key expressions necessarily notices that.
+	let cache = cache();
+	let with_key = |api_key: &str| {
+		let req = ::http::Request::builder()
+			.uri("http://api.example.com/v1/chat/completions")
+			.header("authorization", "Bearer caller-a")
+			.header("x-api-key", api_key)
+			.body(crate::http::Body::empty())
+			.expect("request");
+		key_of(&cache, BODY, &req)
+	};
+	assert_ne!(with_key("sk-tenant-one"), with_key("sk-tenant-two"));
+}
+
+#[test]
+fn a_per_request_signature_bypasses_instead_of_keying_on_itself() {
+	// SigV4 rebuilds the header every request, so it can neither be keyed on nor ignored.
+	let cache = cache();
+	let req = ::http::Request::builder()
+		.uri("http://api.example.com/v1/chat/completions")
+		.header(
+			"authorization",
+			"AWS4-HMAC-SHA256 Credential=AKIA/20260830/us-east-1/bedrock/aws4_request, Signature=abc",
+		)
+		.body(crate::http::Body::empty())
+		.expect("request");
+	let canonical = canonicalize(BODY.as_bytes()).expect("canonical");
+	let inputs = CacheKeyInputs {
+		canonical_body: &canonical,
+		provider: "bedrock",
+		model: "claude",
+		input_format: "Completions",
+		target: "bedrock.us-east-1.amazonaws.com:443",
+		path_and_query: "/model/claude/converse",
+		headers: req.headers(),
+	};
+	assert!(
+		cache.key(&inputs, &req).is_none(),
+		"a signature that changes every request must bypass, not produce a key that never matches"
+	);
+}

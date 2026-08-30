@@ -5699,7 +5699,7 @@
       "type": "object",
       "properties": {
         "key": {
-          "description": "CEL expressions contributing additional dimensions to the cache key, evaluated against the\nrequest. The gateway always keys on the finalized request body, the resolved provider, model,\nclient-facing format, upstream target, and upstream path; these expressions add what only the\ndeployment knows, such as the caller identity a response must not be shared across.\n\nLeaving this empty shares responses between every caller reaching the same route with the same\nbody. That is refused rather than done silently: with no expressions the cache serves no hits.",
+          "description": "CEL expressions contributing additional dimensions to the cache key, evaluated against the\nrequest. The gateway always keys on the finalized request body, the resolved provider, model,\nclient-facing format, upstream target, upstream path, and the credential it attached; these\nexpressions add what only the deployment knows, such as the caller identity a response must\nnot be shared across.\n\nLeaving this empty shares responses between every caller reaching the same route with the same\nbody. That is refused rather than done silently: with no expressions the cache serves no hits.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/Expression"
