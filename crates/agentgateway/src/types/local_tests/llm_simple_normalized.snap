@@ -287,6 +287,11 @@ backends:
             cacheTools: false
             minTokens: 1
             cacheMessageOffset: 0
+          responseCache:
+            key:
+              - "request.headers[\"authorization\"]"
+            ttl: "duration(\"5m\")"
+            maxEntries: 256
   - backend:
       ai:
         name: "llm:model:gpt-3.5-turbo:3"

@@ -11829,6 +11829,17 @@
               "type": "null"
             }
           ]
+        },
+        "responseCache": {
+          "description": "responseCache configures the gateway-side exact response cache.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResponseCacheConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -12023,6 +12034,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/PromptCachingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "responseCache": {
+          "description": "responseCache configures the gateway-side exact response cache.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResponseCacheConfig"
             },
             {
               "type": "null"

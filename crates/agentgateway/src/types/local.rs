@@ -489,6 +489,13 @@ pub struct LocalLLMProviderDefaults {
 	/// Cache-point insertion for LLM providers that support prompt caching.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	prompt_caching: Option<PromptCachingConfig>,
+	/// responseCache configures the gateway-side exact response cache.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[cfg_attr(
+		feature = "schema",
+		schemars(with = "Option<crate::llm::response_cache::ResponseCacheConfig>")
+	)]
+	response_cache: Option<Arc<crate::llm::response_cache::ResponseCache>>,
 }
 
 #[apply(schema_de!)]
@@ -836,6 +843,13 @@ pub struct LocalLLMModels {
 	/// promptCaching configures cache point insertion for supported LLM providers.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	prompt_caching: Option<PromptCachingConfig>,
+	/// responseCache configures the gateway-side exact response cache.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[cfg_attr(
+		feature = "schema",
+		schemars(with = "Option<crate::llm::response_cache::ResponseCacheConfig>")
+	)]
+	response_cache: Option<Arc<crate::llm::response_cache::ResponseCache>>,
 
 	/// matches specifies the conditions under which this model should be used in addition to matching the model name.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1005,6 +1019,7 @@ impl LocalLLMModels {
 			self.health = self.health.take().or(defaults.health);
 			self.backend_tunnel = self.backend_tunnel.take().or(defaults.backend_tunnel);
 			self.prompt_caching = self.prompt_caching.take().or(defaults.prompt_caching);
+			self.response_cache = self.response_cache.take().or(defaults.response_cache);
 		}
 		Ok(())
 	}
@@ -4511,7 +4526,7 @@ async fn convert_llm_config(
 		let prompt_guard =
 			merge_prompt_guards(shared_prompt_guard.clone(), model_config.guardrails.clone());
 		pols.push(BackendTrafficPolicy::AI(Arc::new(llm::Policy {
-			response_cache: None,
+			response_cache: model_config.response_cache.clone(),
 			defaults: model_config.defaults.clone(),
 			overrides: model_config.overrides.clone(),
 			transformations: model_config.transformation.clone(),

@@ -52,6 +52,11 @@ llm:
       cacheSystem: true
       cacheMessages: true
       minTokens: 1
+    responseCache:
+      key:
+      - request.headers["authorization"]
+      ttl: 5m
+      maxEntries: 256
     guardrails:
       request:
       - regex:
