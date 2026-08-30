@@ -191,6 +191,15 @@ pub struct Policy {
 	/// Prompt caching settings for providers that support cache markers.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub prompt_caching: Option<PromptCachingConfig>,
+	/// Gateway-side exact response cache. Unrelated to `promptCaching`: this stores the upstream
+	/// response and serves it again for an identical finalized request, instead of annotating the
+	/// request for a provider-side cache.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[cfg_attr(
+		feature = "schema",
+		schemars(with = "Option<crate::llm::response_cache::ResponseCacheConfig>")
+	)]
+	pub response_cache: Option<Arc<crate::llm::response_cache::ResponseCache>>,
 	/// Route type overrides selected by request path suffix.
 	#[serde(default, skip_serializing_if = "SortedRoutes::is_empty")]
 	#[cfg_attr(
@@ -234,6 +243,12 @@ impl crate::store::HasExpressions for Policy {
 					.prompt_guard
 					.iter()
 					.flat_map(webhook_header_expressions),
+			)
+			.chain(
+				self
+					.response_cache
+					.iter()
+					.flat_map(|cache| cache.expressions()),
 			)
 	}
 }

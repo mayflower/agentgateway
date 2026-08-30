@@ -549,6 +549,12 @@ impl LLMRequestPolicies {
 				.prompt_caching
 				.clone()
 				.or_else(|| fallback.prompt_caching.clone()),
+			// Sharing the `Arc` rather than rebuilding is what makes the cache survive: this merge runs
+			// per request, so a fresh store here would be empty on every lookup.
+			response_cache: preferred
+				.response_cache
+				.clone()
+				.or_else(|| fallback.response_cache.clone()),
 			routes: if preferred.routes.is_empty() {
 				fallback.routes.clone()
 			} else {

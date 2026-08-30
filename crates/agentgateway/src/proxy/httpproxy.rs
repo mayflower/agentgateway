@@ -2837,26 +2837,8 @@ async fn make_backend_call(
 		});
 		return Ok(resp);
 	}
-	let transport = build_backend_transport(&inputs, &backend_call, hbone_source).await?;
-	dtrace::snapshot!(Request, "final request", &req);
-	let request_body_limit = crate::http::buffer_limit(&req);
-	let req = req.map(|b| dtrace::TracingBody::maybe_wrap("final request", b, request_body_limit));
-	let mut call = client::Call {
-		req,
-		target: backend_call.target,
-		connection: client::ConnectionConfig {
-			transport,
-			tcp: backend_call.backend_policies.tcp.clone(),
-			max_connection_duration: backend_call
-				.backend_policies
-				.http
-				.as_ref()
-				.and_then(|h| h.max_connection_duration),
-		},
-	};
-	let span_target = backend_call.span_target;
-	dtrace::trace(|trace| trace.backend_call_started(&call.target));
-	let upstream = inputs.upstream.clone();
+	// Needed by response processing on both the cached and the upstream path, so it is built before
+	// the branch rather than inside it.
 	let llm_logging = log.as_ref().map(|l| llm::LLMLogging {
 		response: l.llm_response.clone(),
 		guardrails: l.guardrails.clone(),
@@ -2866,79 +2848,139 @@ async fn make_backend_call(
 		},
 	});
 	let a2a_type = response_policies.a2a_type.clone();
-
-	let outbound_subtype = if backend_call.backend_policies.llm_provider.is_some() {
-		OutboundCallSubtype::Llm
-	} else {
-		OutboundCallSubtype::Http
-	};
-	let outbound_labels = OutboundCallLabels {
-		kind: OutboundCallKind::Primary,
-		subtype: outbound_subtype,
-	};
-	let mut span = log.as_ref().and_then(|log| {
-		let writer = log.span_writer();
-		writer.is_enabled().then(|| {
-			let mut span = Box::new(writer.start_outbound(outbound_labels));
-			let method = call.req.method().as_str().to_owned();
-			span.rename_span(match &span_target {
-				Some(target) => format!("{method} {target}"),
-				None => method.clone(),
-			});
-			span.add_attribute(KeyValue::new("http.method", method));
-			if let Some(host) = call.req.uri().host() {
-				span.add_attribute(KeyValue::new("http.host", host.to_owned()));
+	dtrace::snapshot!(Request, "final request", &req);
+	// Exact response cache. The key is built here, where the finalized request is still whole:
+	// canonical body, resolved provider and model, upstream target and path, and the forwarded
+	// headers that change provider behavior. Anything the key cannot represent bypasses the cache
+	// rather than keying on part of the request.
+	let response_cache = llm::response_cache::prepare(
+		llm_request_policies.llm.as_deref(),
+		llm_request.as_ref(),
+		&backend_call.target,
+		&req,
+	);
+	let cached = response_cache
+		.as_ref()
+		.and_then(|prepared| prepared.cache.lookup(&prepared.key));
+	let served_from_cache = cached.is_some();
+	let resp = if let Some(hit) = cached {
+		// A hit replaces only the provider call, and nothing else. It is deliberately outside the
+		// outbound span, the `upstream_call_duration` observation, and `upstream_duration` below, so a
+		// replay is never counted, timed, or costed as a fresh call to the provider. Everything after
+		// this point — response policies, LLM response processing, logging — runs normally.
+		log.add(|l| {
+			if l.request_processing_duration.is_none() {
+				l.request_processing_duration = Some(l.request_processing_start.elapsed());
 			}
-			span.add_attribute(KeyValue::new(
-				"http.path",
-				http::get_path_and_query(call.req.uri()).to_owned(),
-			));
-			span.inject_context(&mut call.req);
-			span
-		})
-	});
-	let outbound_start = std::time::Instant::now();
-	log.add(|l| {
-		if l.request_processing_duration.is_none() {
-			l.request_processing_duration = Some(l.request_processing_start.elapsed());
+			l.response_processing_start = Some(Instant::now());
+			l.llm_response_cache_hit = true;
+		});
+		Ok(hit.into_response())
+	} else {
+		let transport = build_backend_transport(&inputs, &backend_call, hbone_source).await?;
+		let request_body_limit = crate::http::buffer_limit(&req);
+		let req = req.map(|b| dtrace::TracingBody::maybe_wrap("final request", b, request_body_limit));
+		let mut call = client::Call {
+			req,
+			target: backend_call.target,
+			connection: client::ConnectionConfig {
+				transport,
+				tcp: backend_call.backend_policies.tcp.clone(),
+				max_connection_duration: backend_call
+					.backend_policies
+					.http
+					.as_ref()
+					.and_then(|h| h.max_connection_duration),
+			},
+		};
+		let span_target = backend_call.span_target;
+		dtrace::trace(|trace| trace.backend_call_started(&call.target));
+		let upstream = inputs.upstream.clone();
+
+		let outbound_subtype = if backend_call.backend_policies.llm_provider.is_some() {
+			OutboundCallSubtype::Llm
+		} else {
+			OutboundCallSubtype::Http
+		};
+		let outbound_labels = OutboundCallLabels {
+			kind: OutboundCallKind::Primary,
+			subtype: outbound_subtype,
+		};
+		let mut span = log.as_ref().and_then(|log| {
+			let writer = log.span_writer();
+			writer.is_enabled().then(|| {
+				let mut span = Box::new(writer.start_outbound(outbound_labels));
+				let method = call.req.method().as_str().to_owned();
+				span.rename_span(match &span_target {
+					Some(target) => format!("{method} {target}"),
+					None => method.clone(),
+				});
+				span.add_attribute(KeyValue::new("http.method", method));
+				if let Some(host) = call.req.uri().host() {
+					span.add_attribute(KeyValue::new("http.host", host.to_owned()));
+				}
+				span.add_attribute(KeyValue::new(
+					"http.path",
+					http::get_path_and_query(call.req.uri()).to_owned(),
+				));
+				span.inject_context(&mut call.req);
+				span
+			})
+		});
+		let outbound_start = std::time::Instant::now();
+		log.add(|l| {
+			if l.request_processing_duration.is_none() {
+				l.request_processing_duration = Some(l.request_processing_start.elapsed());
+			}
+		});
+		let resp = upstream.call(call).await;
+		if let Some(span) = span.as_deref_mut() {
+			match &resp {
+				Ok(response) => span.add_attribute(KeyValue::new(
+					"http.status",
+					i64::from(response.status().as_u16()),
+				)),
+				Err(error) => span.set_error(error.as_reason().to_string(), error.to_string()),
+			}
 		}
-	});
-	let resp = upstream.call(call).await;
-	if let Some(span) = span.as_deref_mut() {
-		match &resp {
-			Ok(response) => span.add_attribute(KeyValue::new(
-				"http.status",
-				i64::from(response.status().as_u16()),
-			)),
-			Err(error) => span.set_error(error.as_reason().to_string(), error.to_string()),
-		}
-	}
-	let outbound_end = Instant::now();
-	log.add(|l| {
-		l.metrics
-			.upstream_call_duration
-			.get_or_create(&outbound_labels)
-			.observe((outbound_end - outbound_start).as_secs_f64());
-		l.upstream_duration = Some(outbound_end - outbound_start);
-		if resp.is_ok() {
-			l.response_processing_start = Some(outbound_end);
-		}
-	});
-	dtrace::trace(|trace| match &resp {
-		Ok(resp) => trace.backend_call_completed(
-			Some(outbound_start),
-			Instant::now(),
-			Some(resp.status().as_u16()),
-			None,
-		),
-		Err(err) => trace.backend_call_completed(
-			Some(outbound_start),
-			Instant::now(),
-			None,
-			Some(err.to_string()),
-		),
-	});
+		let outbound_end = Instant::now();
+		log.add(|l| {
+			l.metrics
+				.upstream_call_duration
+				.get_or_create(&outbound_labels)
+				.observe((outbound_end - outbound_start).as_secs_f64());
+			l.upstream_duration = Some(outbound_end - outbound_start);
+			if resp.is_ok() {
+				l.response_processing_start = Some(outbound_end);
+			}
+		});
+		dtrace::trace(|trace| match &resp {
+			Ok(resp) => trace.backend_call_completed(
+				Some(outbound_start),
+				Instant::now(),
+				Some(resp.status().as_u16()),
+				None,
+			),
+			Err(err) => trace.backend_call_completed(
+				Some(outbound_start),
+				Instant::now(),
+				None,
+				Some(err.to_string()),
+			),
+		});
+		resp
+	};
 	let mut resp = resp?;
+	// Store before anything downstream can rewrite the response: what is kept is the upstream reply
+	// exactly as it arrived, so replaying it re-enters the normal buffered path.
+	if let Some(prepared) = response_cache.as_ref()
+		&& !served_from_cache
+	{
+		let limit = crate::http::response_buffer_limit(&resp);
+		resp = llm::response_cache::store(prepared, resp, limit)
+			.await
+			.map_err(ProxyError::Body)?;
+	}
 	if let Some(log) = log.as_ref() {
 		resp
 			.extensions_mut()

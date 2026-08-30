@@ -1363,3 +1363,224 @@ impl ratelimitmock::Handler for RecordingRateLimit {
 		ratelimitmock::ok_response()
 	}
 }
+
+// ── exact response cache ────────────────────────────────────────────────────
+
+/// A provider with the exact response cache configured, keyed on the caller's authorization.
+fn response_cache_provider(
+	mock: &MockServer,
+	ttl: &str,
+) -> agentgateway::types::local::LocalNamedAIProvider {
+	agentgateway::types::local::LocalNamedAIProvider {
+		name: "default".into(),
+		provider: AIProvider::OpenAI(openai::Provider {
+			model: None,
+			moderation: None,
+		}),
+		host_override: Some(Target::Address(*mock.address())),
+		path_override: None,
+		path_prefix: None,
+		tokenize: false,
+		policies: serde_json::from_value(json!({
+			"ai": {
+				"responseCache": {
+					"key": ["request.headers[\"authorization\"]"],
+					"ttl": ttl,
+				}
+			}
+		}))
+		.unwrap(),
+	}
+}
+
+async fn send_completion(
+	io: &hyper_util::client::legacy::Client<
+		agentgateway::test_helpers::proxymock::MemoryConnector,
+		Body,
+	>,
+	body: &[u8],
+	authorization: &str,
+) -> StatusCode {
+	let res = RequestBuilder::new(Method::POST, "http://lo/v1/chat/completions")
+		.header(header::CONTENT_TYPE, "application/json")
+		.header(header::AUTHORIZATION, authorization)
+		.body(Body::from(body.to_vec()))
+		.send(io.clone())
+		.await
+		.unwrap();
+	let status = res.status();
+	let _ = read_body_raw(res.into_body()).await;
+	status
+}
+
+async fn upstream_calls(mock: &MockServer) -> usize {
+	mock.received_requests().await.expect("requests").len()
+}
+
+#[tokio::test]
+async fn response_cache_serves_the_second_identical_request() {
+	let mock = body_mock(llm_body!("response/completions/basic.json")).await;
+	let provider = response_cache_provider(&mock, "5m");
+	let (mock, _bind, io) = setup_llm_named_provider_mock(mock, provider, "{}");
+	let body = llm_body!("requests/completions/basic.json");
+
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	assert_eq!(upstream_calls(&mock).await, 1);
+
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	assert_eq!(
+		upstream_calls(&mock).await,
+		1,
+		"an identical request must be served from the cache, not the provider"
+	);
+}
+
+#[tokio::test]
+async fn response_cache_ignores_object_key_order() {
+	let mock = body_mock(llm_body!("response/completions/basic.json")).await;
+	let provider = response_cache_provider(&mock, "5m");
+	let (mock, _bind, io) = setup_llm_named_provider_mock(mock, provider, "{}");
+
+	// The same request written with its top-level keys in a different order.
+	let a = br#"{"model":"replaceme","messages":[{"role":"user","content":"hi"}]}"#;
+	let b = br#"{"messages":[{"role":"user","content":"hi"}],"model":"replaceme"}"#;
+
+	assert_eq!(send_completion(&io, a, "Bearer a").await, StatusCode::OK);
+	assert_eq!(send_completion(&io, b, "Bearer a").await, StatusCode::OK);
+	assert_eq!(
+		upstream_calls(&mock).await,
+		1,
+		"syntactic key order carries no meaning and must not separate entries"
+	);
+}
+
+#[tokio::test]
+async fn response_cache_does_not_share_across_callers() {
+	let mock = body_mock(llm_body!("response/completions/basic.json")).await;
+	let provider = response_cache_provider(&mock, "5m");
+	let (mock, _bind, io) = setup_llm_named_provider_mock(mock, provider, "{}");
+	let body = llm_body!("requests/completions/basic.json");
+
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	assert_eq!(send_completion(&io, body, "Bearer b").await, StatusCode::OK);
+	assert_eq!(
+		upstream_calls(&mock).await,
+		2,
+		"a second caller must not receive the first caller's completion"
+	);
+}
+
+#[tokio::test]
+async fn response_cache_misses_when_the_body_differs() {
+	let mock = body_mock(llm_body!("response/completions/basic.json")).await;
+	let provider = response_cache_provider(&mock, "5m");
+	let (mock, _bind, io) = setup_llm_named_provider_mock(mock, provider, "{}");
+
+	let a = br#"{"model":"replaceme","messages":[{"role":"user","content":"hi"}]}"#;
+	let b = br#"{"model":"replaceme","messages":[{"role":"user","content":"hello"}]}"#;
+
+	assert_eq!(send_completion(&io, a, "Bearer a").await, StatusCode::OK);
+	assert_eq!(send_completion(&io, b, "Bearer a").await, StatusCode::OK);
+	assert_eq!(upstream_calls(&mock).await, 2);
+}
+
+#[tokio::test]
+async fn response_cache_expires_entries() {
+	let mock = body_mock(llm_body!("response/completions/basic.json")).await;
+	let provider = response_cache_provider(&mock, "1ms");
+	let (mock, _bind, io) = setup_llm_named_provider_mock(mock, provider, "{}");
+	let body = llm_body!("requests/completions/basic.json");
+
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	tokio::time::sleep(Duration::from_millis(20)).await;
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	assert_eq!(
+		upstream_calls(&mock).await,
+		2,
+		"an expired entry is a miss, not a stale hit"
+	);
+}
+
+#[tokio::test]
+async fn response_cache_bypasses_streaming() {
+	let mock = body_mock(llm_body!("response/completions/basic.json")).await;
+	let provider = response_cache_provider(&mock, "5m");
+	let (mock, _bind, io) = setup_llm_named_provider_mock(mock, provider, "{}");
+	let body = br#"{"model":"replaceme","stream":true,"messages":[{"role":"user","content":"hi"}]}"#;
+
+	let _ = send_completion(&io, body, "Bearer a").await;
+	let _ = send_completion(&io, body, "Bearer a").await;
+	assert_eq!(
+		upstream_calls(&mock).await,
+		2,
+		"streaming responses are not cached in this version"
+	);
+}
+
+#[tokio::test]
+async fn without_configuration_nothing_is_cached() {
+	let mock = body_mock(llm_body!("response/completions/basic.json")).await;
+	let provider = agentgateway::test_helpers::proxymock::llm_named_provider(
+		&mock,
+		AIProvider::OpenAI(openai::Provider {
+			model: None,
+			moderation: None,
+		}),
+		false,
+	);
+	let (mock, _bind, io) = setup_llm_named_provider_mock(mock, provider, "{}");
+	let body = llm_body!("requests/completions/basic.json");
+
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	assert_eq!(upstream_calls(&mock).await, 2);
+}
+
+#[tokio::test]
+async fn a_cache_without_key_expressions_serves_no_hits() {
+	let mock = body_mock(llm_body!("response/completions/basic.json")).await;
+	let mut provider = response_cache_provider(&mock, "5m");
+	provider.policies = serde_json::from_value(json!({
+		"ai": { "responseCache": { "ttl": "5m" } }
+	}))
+	.unwrap();
+	let (mock, _bind, io) = setup_llm_named_provider_mock(mock, provider, "{}");
+	let body = llm_body!("requests/completions/basic.json");
+
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	assert_eq!(send_completion(&io, body, "Bearer b").await, StatusCode::OK);
+	assert_eq!(
+		upstream_calls(&mock).await,
+		2,
+		"with nothing declaring caller identity, sharing is refused rather than silent"
+	);
+}
+
+#[tokio::test]
+async fn response_cache_hit_is_visible_and_not_charged_again() {
+	agent_core::telemetry::testing::setup_test_logging();
+	let mock = body_mock(llm_body!("response/completions/basic.json")).await;
+	let provider = response_cache_provider(&mock, "5m");
+	let (mock, _bind, io) = setup_llm_named_provider_mock(mock, provider, "{}");
+	let body = llm_body!("requests/completions/basic.json");
+
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	assert_eq!(send_completion(&io, body, "Bearer a").await, StatusCode::OK);
+	assert_eq!(upstream_calls(&mock).await, 1);
+
+	// The replay is marked, so an operator can tell a served request from a provider call, and the
+	// cost metric can skip it. Usage is still reported: the client consumed those tokens.
+	let log = agent_core::telemetry::testing::eventually_find(&[
+		("scope", "request"),
+		("agw.ai.response_cache", "hit"),
+	])
+	.await
+	.unwrap();
+	let want = json!({
+		"agw.ai.response_cache": "hit",
+		"gen_ai.provider.name": "openai",
+		"gen_ai.usage.input_tokens": 17,
+		"gen_ai.usage.output_tokens": 23,
+	});
+	assert!(is_json_subset(&want, &log), "want={want:#?} got={log:#?}");
+}

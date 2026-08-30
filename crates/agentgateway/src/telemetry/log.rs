@@ -846,10 +846,14 @@ impl DropOnLog {
 					CostLookupStatus::Exact | CostLookupStatus::NoCatalog => {},
 				}
 			}
+			// A replayed response carries the original's usage, and that usage is still worth
+			// reporting — but the provider was not called and charged nothing for it, so adding its
+			// price again would inflate spend by exactly the amount the cache saved.
 			if let Some(cost) = llm_response
 				.cost
 				.as_ref()
 				.and_then(|cost| cost.total().to_f64())
+				.filter(|_| !log.llm_response_cache_hit)
 			{
 				log
 					.metrics
@@ -1019,6 +1023,7 @@ impl RequestLog {
 			outgoing_span: None,
 			llm_request: None,
 			llm_response: Default::default(),
+			llm_response_cache_hit: false,
 			guardrails: Default::default(),
 			budgets: None,
 			a2a_method: None,
@@ -1190,6 +1195,11 @@ pub struct RequestLog {
 
 	pub llm_request: Option<llm::LLMRequest>,
 	pub llm_response: AsyncLog<llm::LLMInfo>,
+	/// Set when the exact response cache served this request instead of the provider. The response
+	/// is processed normally from here, so usage is still reported and the token rate-limit
+	/// reservation is still reconciled — but no provider call happened, so no provider cost is
+	/// charged for it.
+	pub llm_response_cache_hit: bool,
 	pub guardrails: GuardrailLog,
 	pub budgets: Option<crate::http::budget::BudgetSettlement>,
 
@@ -1633,6 +1643,12 @@ impl Drop for DropOnLog {
 					llm_response
 						.as_ref()
 						.and_then(|l| l.response_model.display()),
+				),
+				// Only emitted on a hit: a field on every request would be noise, and its absence
+				// already means the provider was called.
+				(
+					"agw.ai.response_cache",
+					log.llm_response_cache_hit.then(|| "hit".into()),
 				),
 				("gen_ai.usage.input_tokens", input_tokens.map(Into::into)),
 				(

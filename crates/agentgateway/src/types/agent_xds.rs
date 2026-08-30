@@ -1101,6 +1101,8 @@ fn convert_backend_ai_policy(
 	});
 
 	let mut policy = llm::Policy {
+		// Not exposed through XDS in this version; standalone configuration only.
+		response_cache: None,
 		prompt_guard: prompt_guard.transpose()?,
 		defaults: Some(
 			ai.defaults

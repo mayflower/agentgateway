@@ -35,6 +35,7 @@ pub use agent_llm::{azure, bedrock, vertex};
 
 pub mod catalog;
 pub mod policy;
+pub mod response_cache;
 
 use policy::streaming_guardrails::GuardedSseBody;
 pub use types::{OutputMessage, OutputMessagePart, ToolCall};
@@ -2095,6 +2096,16 @@ impl AIProvider {
 			Some(p) => p.apply_final_transformations(rendered.body, log)?,
 			None => rendered.body,
 		};
+		// Carry the finalized body to the point where the exact response cache builds its key: that
+		// point only has an opaque `Body`, and this is the last place the bytes exist. Canonicalized
+		// here so JSON handling stays in the LLM layer. Only done when a cache is configured.
+		if policies.is_some_and(|p| p.response_cache.is_some())
+			&& let Some(canonical) = response_cache::canonicalize(&body)
+		{
+			parts
+				.extensions
+				.insert(response_cache::CanonicalRequestBody(canonical));
+		}
 		parts.headers.remove(header::CONTENT_LENGTH);
 		let req = Request::from_parts(parts, Body::from(body));
 		Ok(RequestResult::Success {

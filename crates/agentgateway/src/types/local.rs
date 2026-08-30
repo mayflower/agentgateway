@@ -4511,6 +4511,7 @@ async fn convert_llm_config(
 		let prompt_guard =
 			merge_prompt_guards(shared_prompt_guard.clone(), model_config.guardrails.clone());
 		pols.push(BackendTrafficPolicy::AI(Arc::new(llm::Policy {
+			response_cache: None,
 			defaults: model_config.defaults.clone(),
 			overrides: model_config.overrides.clone(),
 			transformations: model_config.transformation.clone(),
