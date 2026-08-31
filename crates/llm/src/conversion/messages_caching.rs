@@ -1,17 +1,8 @@
-//! Policy-generated Anthropic `cache_control` markers.
-//!
-//! The `promptCaching` policy already generates `cachePoint` blocks for Bedrock during request
-//! translation (see `conversion::bedrock`). This module does the same for the native Anthropic
-//! Messages API.
-//!
-//! Anthropic is reached through two different request representations — native Messages input
-//! (`types::messages::Request`) and OpenAI Completions translated to Messages
-//! (`types::messages::typed::Request`) — but both serialize to the same Anthropic wire shape.
-//! Applying the policy to that shape keeps one implementation instead of two, and passes
-//! unknown fields through untouched because they are still just JSON.
-//!
-//! Boundary and offset semantics deliberately mirror the Bedrock implementation so a single
-//! `promptCaching` policy behaves the same on both providers.
+//! Policy-generated Anthropic `cache_control` markers, the Messages API equivalent of the
+//! `cachePoint` blocks `conversion::bedrock` generates. Native Messages and
+//! Completions-translated-to-Messages share a wire shape, so the policy is applied to that shape
+//! rather than to each representation. Boundaries mirror Bedrock so one policy behaves the same on
+//! both providers.
 
 use serde_json::{Map, Value, json};
 
@@ -20,16 +11,15 @@ use crate::PromptCachingConfig;
 /// Anthropic rejects requests carrying more than four cache breakpoints.
 const MAX_CACHE_BREAKPOINTS: usize = 4;
 
-/// Apply the policy to a request already in Anthropic Messages wire shape.
-///
-/// Best-effort: a request with no cacheable boundary, or no remaining breakpoint budget, is
-/// left as-is rather than rejected. Client-supplied markers are never modified or removed.
+/// Apply the policy to a request already in Anthropic Messages wire shape. Best-effort: a request
+/// with no cacheable boundary or no remaining budget is sent as-is, and client markers are kept.
 pub fn apply(req: &mut Value, caching: &PromptCachingConfig) {
 	let Some(req) = req.as_object_mut() else {
 		return;
 	};
 
-	// Client-supplied markers consume the budget first; we only ever use what is left.
+	// Client markers consume the budget first. A client may exceed it, which Anthropic rejects on its
+	// own; here it just means nothing is left to add.
 	let mut used = count_markers(req);
 
 	// Order matches the Bedrock implementation: system, then messages, then tools.
@@ -42,10 +32,8 @@ pub fn apply(req: &mut Value, caching: &PromptCachingConfig) {
 	if caching.cache_tools && used < MAX_CACHE_BREAKPOINTS && apply_tools(req) {
 		used += 1;
 	}
-	debug_assert!(used <= MAX_CACHE_BREAKPOINTS);
 }
 
-/// Count `cache_control` markers already present anywhere in the request.
 fn count_markers(req: &Map<String, Value>) -> usize {
 	let system = req.get("system").map(count_in_blocks).unwrap_or(0);
 	let tools = req.get("tools").map(count_in_blocks).unwrap_or(0);
@@ -62,7 +50,6 @@ fn count_markers(req: &Map<String, Value>) -> usize {
 	system + messages + tools
 }
 
-/// Count markers in a value that is either a block array or a bare string (never marked).
 fn count_in_blocks(value: &Value) -> usize {
 	value
 		.as_array()
@@ -76,8 +63,7 @@ fn has_marker(block: &Value) -> bool {
 		.is_some_and(|marker| !marker.is_null())
 }
 
-/// Add the default ephemeral marker. Returns false when the block already carries one, so an
-/// explicit client marker (including its TTL or other fields) is never overwritten.
+/// Returns false when the block already carries a marker, so a client's own TTL is never replaced.
 fn mark(block: &mut Value) -> bool {
 	let Some(block) = block.as_object_mut() else {
 		return false;
@@ -92,8 +78,7 @@ fn mark(block: &mut Value) -> bool {
 	true
 }
 
-/// Coerce Anthropic's string shorthand into the equivalent single-text-block array so it can
-/// carry a marker. Anything already in block form is left alone.
+/// Coerce Anthropic's string shorthand into the block form that can carry a marker.
 fn as_blocks(value: &mut Value) -> Option<&mut Vec<Value>> {
 	if let Some(text) = value.as_str() {
 		*value = json!([{"type": "text", "text": text}]);
@@ -101,11 +86,9 @@ fn as_blocks(value: &mut Value) -> Option<&mut Vec<Value>> {
 	value.as_array_mut()
 }
 
-/// Content block types that accept `cache_control`, mirroring the blocks that carry the field in
-/// `types::messages::typed::ContentBlock`. `thinking` and `redacted_thinking` deliberately do not.
-///
-/// An unrecognised type is skipped rather than marked: losing an optimization is harmless, while
-/// attaching a marker Anthropic rejects would break an otherwise valid request.
+/// Block types that accept `cache_control`, per `types::messages::typed::ContentBlock`. An
+/// allowlist because an unknown type costs an optimization, while a marker Anthropic rejects costs
+/// the request.
 const CACHEABLE_BLOCK_TYPES: &[&str] = &[
 	"text",
 	"image",
@@ -124,8 +107,6 @@ fn is_cacheable_block(block: &Value) -> bool {
 		.is_some_and(|t| CACHEABLE_BLOCK_TYPES.contains(&t))
 }
 
-/// Mark the last content block that can carry a marker, walking back past blocks that cannot
-/// (a trailing `thinking` block, or a non-object entry).
 fn mark_last_content_block(blocks: &mut [Value]) -> bool {
 	blocks
 		.iter_mut()
@@ -133,8 +114,7 @@ fn mark_last_content_block(blocks: &mut [Value]) -> bool {
 		.is_some_and(mark)
 }
 
-/// Mark the last tool. Tool definitions all accept `cache_control`, and custom tools carry no
-/// `type` discriminator, so the content-block allowlist does not apply here.
+/// Tools all accept `cache_control` and custom ones carry no `type`, so the allowlist is skipped.
 fn mark_last_tool(tools: &mut [Value]) -> bool {
 	tools
 		.iter_mut()
@@ -159,9 +139,8 @@ fn apply_messages(req: &mut Map<String, Value>, caching: &PromptCachingConfig) -
 	let Some(messages) = req.get_mut("messages").and_then(Value::as_array_mut) else {
 		return false;
 	};
-	// Cache the conversation history but not the current turn: the default boundary is the
-	// second-to-last message, and `cacheMessageOffset` walks it further back, clamped at the
-	// first message. Nothing to reuse yet with fewer than two messages.
+	// The history is cacheable, the current turn is not: mark the second-to-last message, walked
+	// further back by `cacheMessageOffset` and clamped at the first.
 	if messages.len() < 2 {
 		return false;
 	}
@@ -179,8 +158,7 @@ fn apply_tools(req: &mut Map<String, Value>) -> bool {
 		.is_some_and(|tools| mark_last_tool(tools))
 }
 
-/// Rough token estimate for the system prompt, matching the Bedrock heuristic
-/// (whitespace-separated words, scaled by 1.3) so `minTokens` means the same thing on both.
+/// Bedrock's heuristic (words scaled by 1.3), so `minTokens` means the same on both providers.
 fn estimate_system_tokens(system: &Value) -> usize {
 	let words = match system {
 		Value::String(text) => text.split_whitespace().count(),

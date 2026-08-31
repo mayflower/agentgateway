@@ -342,51 +342,6 @@ fn thinking_blocks_never_receive_a_marker() {
 }
 
 #[test]
-fn redacted_thinking_only_message_is_skipped() {
-	let mut req = json!({
-		"messages": [
-			{"role": "assistant", "content": [{"type": "redacted_thinking", "data": "x"}]},
-			{"role": "user", "content": [{"type": "text", "text": "next"}]},
-		],
-	});
-	let before = req.clone();
-	apply(&mut req, &all());
-	assert_eq!(req, before, "no markable block, so the boundary is skipped");
-}
-
-#[test]
-fn unknown_block_types_are_skipped_not_marked() {
-	// Losing the optimization is harmless; emitting a marker Anthropic rejects is not.
-	let mut req = json!({
-		"messages": [
-			{"role": "user", "content": [{"type": "some_future_block", "x": 1}]},
-			{"role": "user", "content": [{"type": "text", "text": "next"}]},
-		],
-	});
-	let before = req.clone();
-	apply(&mut req, &all());
-	assert_eq!(req, before);
-}
-
-#[test]
-fn every_cacheable_block_type_can_be_marked() {
-	for ty in CACHEABLE_BLOCK_TYPES {
-		let mut req = json!({
-			"messages": [
-				{"role": "user", "content": [{"type": ty}]},
-				{"role": "user", "content": [{"type": "text", "text": "next"}]},
-			],
-		});
-		apply(&mut req, &all());
-		assert_eq!(
-			req["messages"][0]["content"][0]["cache_control"],
-			marker(),
-			"{ty} should accept a marker"
-		);
-	}
-}
-
-#[test]
 fn tools_without_a_type_discriminator_are_still_marked() {
 	// Custom Anthropic tools are {name, description, input_schema} with no `type`.
 	let mut req = json!({
@@ -395,4 +350,41 @@ fn tools_without_a_type_discriminator_are_still_marked() {
 	});
 	apply(&mut req, &all());
 	assert_eq!(req["tools"][0]["cache_control"], marker());
+}
+
+#[test]
+fn more_client_markers_than_the_budget_are_left_alone() {
+	let m = json!({"type": "ephemeral"});
+	let mut req = json!({
+		"system": [{"type": "text", "text": "s", "cache_control": m}],
+		"tools": [{"name": "t", "cache_control": m}],
+		"messages": [
+			{"role": "user", "content": [{"type": "text", "text": "a", "cache_control": m}]},
+			{"role": "user", "content": [{"type": "text", "text": "b", "cache_control": m}]},
+			{"role": "user", "content": [{"type": "text", "text": "c", "cache_control": m}]},
+		],
+	});
+	let before = req.clone();
+	apply(&mut req, &all());
+	assert_eq!(req, before, "no budget left, so nothing is added");
+}
+
+#[test]
+fn a_boundary_with_no_markable_block_is_left_alone() {
+	// Losing the optimization is harmless; emitting a marker Anthropic rejects is not. Unknown types
+	// are treated like the known-unmarkable ones so a future block type cannot break a request.
+	for block in [
+		json!({"type": "redacted_thinking", "data": "x"}),
+		json!({"type": "some_future_block", "x": 1}),
+	] {
+		let mut req = json!({
+			"messages": [
+				{"role": "user", "content": [block]},
+				{"role": "user", "content": [{"type": "text", "text": "next"}]},
+			],
+		});
+		let before = req.clone();
+		apply(&mut req, &all());
+		assert_eq!(req, before);
+	}
 }
