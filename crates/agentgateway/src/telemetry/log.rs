@@ -847,7 +847,7 @@ impl DropOnLog {
 				}
 			}
 			// A replayed response carries the original's usage, and that usage is still worth
-			// reporting — but the provider was not called and charged nothing for it, so adding its
+			// reporting, but the provider was not called and charged nothing for it, so adding its
 			// price again would inflate spend by exactly the amount the cache saved.
 			if let Some(cost) = llm_response
 				.cost
@@ -1197,8 +1197,7 @@ pub struct RequestLog {
 	pub llm_response: AsyncLog<llm::LLMInfo>,
 	/// Set when the exact response cache served this request instead of the provider. The response
 	/// is processed normally from here, so usage is still reported and the token rate-limit
-	/// reservation is still reconciled — but no provider call happened, so no provider cost is
-	/// charged for it.
+	/// reservation is still reconciled, but no provider call happened, so no cost is charged.
 	pub llm_response_cache_hit: bool,
 	pub guardrails: GuardrailLog,
 	pub budgets: Option<crate::http::budget::BudgetSettlement>,

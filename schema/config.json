@@ -5699,7 +5699,7 @@
       "type": "object",
       "properties": {
         "key": {
-          "description": "CEL expressions contributing additional dimensions to the cache key, evaluated against the\nrequest. The gateway always keys on the finalized request body, the resolved provider, model,\nclient-facing format, upstream target, upstream path, and the credential it attached; these\nexpressions add what only the deployment knows, such as the caller identity a response must\nnot be shared across.\n\nLeaving this empty shares responses between every caller reaching the same route with the same\nbody. That is refused rather than done silently: with no expressions the cache serves no hits.",
+          "description": "Extra cache-key dimensions, evaluated against the request. The gateway always keys on the\nfinalized body, provider, model, format, upstream target and path, and the attached credential;\nthese add what only the deployment knows, such as the caller a response must not be shared\nacross. With no expressions the cache serves no hits, rather than sharing silently.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/Expression"
@@ -5710,7 +5710,7 @@
           "$ref": "#/$defs/Expression"
         },
         "maxEntries": {
-          "description": "Maximum number of stored responses. `0` disables storage without removing the policy.\n\nThis bounds the entry count, not bytes. Each entry is at most one buffered response, so the\nworst case is `maxEntries` multiplied by the response buffer limit already in force for the\nroute. The cache is per-process and lost on restart.",
+          "description": "Maximum number of stored responses; `0` disables storage. Bounds the entry count, not bytes:\nthe worst case is `maxEntries` times the route's response buffer limit. Per-process, and lost\non restart.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,

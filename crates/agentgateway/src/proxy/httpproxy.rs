@@ -2867,7 +2867,7 @@ async fn make_backend_call(
 		// A hit replaces only the provider call, and nothing else. It is deliberately outside the
 		// outbound span, the `upstream_call_duration` observation, and `upstream_duration` below, so a
 		// replay is never counted, timed, or costed as a fresh call to the provider. Everything after
-		// this point — response policies, LLM response processing, logging — runs normally.
+		// this point (response policies, LLM response processing, logging) runs normally.
 		log.add(|l| {
 			if l.request_processing_duration.is_none() {
 				l.request_processing_duration = Some(l.request_processing_start.elapsed());
